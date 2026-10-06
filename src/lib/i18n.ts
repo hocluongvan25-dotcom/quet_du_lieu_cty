@@ -115,8 +115,8 @@ export const copy = {
     drawer: {
       report: "Company Report",
       confidence: "Entity confidence",
-      detailChannels: "Email bộ phận & theo vùng",
-      detailChannelsText: "Tìm thấy trên trang công khai của công ty, kèm nguồn và nhãn.",
+      detailChannels: "Email bộ phận",
+      detailChannelsText: "Email chung của bộ phận, tìm thấy trên trang công khai của công ty.",
       sources: "Nguồn đã kiểm tra",
       sourcesText: "Lưu evidence để người dùng tự xác minh.",
       snapshot: "Snapshot còn",
@@ -285,8 +285,8 @@ export const copy = {
     drawer: {
       report: "Company Report",
       confidence: "Entity confidence",
-      detailChannels: "Department & regional emails",
-      detailChannelsText: "Found on the company's public pages, with source and label.",
+      detailChannels: "Department emails",
+      detailChannelsText: "Department addresses found on the company's public pages.",
       sources: "Checked sources",
       sourcesText: "Evidence is kept so your team can validate it.",
       snapshot: "Snapshot has",

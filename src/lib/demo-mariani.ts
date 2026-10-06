@@ -100,6 +100,8 @@ export const marianiReport: CompanyReport = {
       identityMatch: "person",
       sourceUrl: "https://mariani.com/pages/contact-us",
       via: "Senior Director of Global Commodity Sales",
+      personName: "Steve Sousa",
+      personTitle: "Senior Director of Global Commodity Sales",
       policy: "needs_mailbox_check",
     },
     {
@@ -112,6 +114,7 @@ export const marianiReport: CompanyReport = {
       identityMatch: "person",
       sourceUrl: "https://mariani.com/pages/contact-us",
       via: "Asia — Japan & China",
+      personName: "Todd Garcia",
       policy: "needs_mailbox_check",
     },
   ],

@@ -47,8 +47,8 @@ export function PeoplePanel({ locale, people, onCopy }: { locale: AppLocale; peo
         {people.map((person) => (
           <article key={person.id} className="min-w-0 rounded-xl border border-[#E9EBF0] bg-white p-3.5">
             <h4 className="text-[13px] font-bold text-[#333747]">{person.name}</h4>
-            <p className="mt-0.5 text-[11px] font-semibold text-[#5D6371]">{person.title}</p>
-            <p className="mt-0.5 text-[10px] text-[#8A90A0]">{person.department}</p>
+            {person.title ? <p className="mt-0.5 text-[11px] font-semibold text-[#5D6371]">{person.title}</p> : null}
+            {person.department ? <p className="mt-0.5 text-[10px] text-[#8A90A0]">{person.department}</p> : null}
             {person.previousRole ? <p className="mt-0.5 text-[10px] text-[#8A90A0]">{person.previousRole}</p> : null}
 
             {person.channels.length > 0 ? (

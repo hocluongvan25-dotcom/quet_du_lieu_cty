@@ -35,6 +35,8 @@ export function channelToContact(channel: FoundChannel): Contact {
     source: hostOf(channel.sourceUrl),
     certainty: channel.certainty,
     identityMatch: channel.identityMatch,
+    personName: channel.personName,
+    personTitle: channel.personTitle,
     policy: channel.policy,
     sourceUrl: channel.sourceUrl,
     via: channel.evidenceSnippet,

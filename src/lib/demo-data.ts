@@ -27,6 +27,9 @@ export type Contact = {
   /** Optional provenance fields: present on data that came through the pipeline. */
   certainty?: Certainty;
   identityMatch?: IdentityMatch;
+  /** Khi `identityMatch === "person"`: tên và chức danh công bố kèm kênh này. */
+  personName?: string;
+  personTitle?: string;
   via?: string;
   sourceUrl?: string;
   policy?: ChannelPolicy;

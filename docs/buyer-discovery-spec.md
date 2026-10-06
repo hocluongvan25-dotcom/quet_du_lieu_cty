@@ -121,10 +121,14 @@ Thứ tự ưu tiên thị trường: **Mỹ** (B/L công khai, tiếng Anh, d�
 | SEC EDGAR | Ban điều hành công ty đại chúng | Có | Công khai | Miễn phí |
 | Sổ đăng ký EU | Officers | Có | Trả phí/bản chính thức | Tùy nước |
 | Website công ty, press release, hội chợ | Người + kênh do công ty tự công bố | Có | An toàn nhất | Miễn phí |
+| LinkedIn (profile công khai, chưa đăng nhập) | Tên, chức danh, công ty, lịch sử làm việc | Có, ở mức danh tính | Xem công khai thì được, nhưng chỉ được tới login wall (khoảng 3–5 profile) và không được thu thập tự động | Miễn phí (rất giới hạn) |
+| Nhà cung cấp enrichment (Apollo, ZoomInfo, Volza…) | Email, số điện thoại, người liên hệ — từ **database riêng của họ**, không phải từ LinkedIn | Có | Phải có căn cứ pháp lý khi dùng; dữ liệu không phải do mình thu thập nên không kiểm chứng được nguồn | Trả phí |
 | Agent đọc web của Seekora | Người, chức danh, profile URL, kênh do công ty công bố | Có (nếu được công bố) | Đọc trang công khai khi **chưa đăng nhập**: theo hiQ và Meta v. Bright Data, việc này không vi phạm CFAA và không ràng buộc bởi user agreement (chỉ áp dụng cho người đã đăng nhập). GDPR/PDP Law vẫn áp dụng cho dữ liệu cá nhân | Chi phí hạ tầng |
 | Email verifier (MillionVerifier, NeverBounce, ZeroBounce, DeBounce) | Hộp thư còn sống hay không (SMTP handshake) | Không | Chỉ kiểm tra hộp thư, không thu thập dữ liệu cá nhân | ~2–10 USD/1.000 |
 
 **Quy tắc:** đi tới **nguồn gốc của dữ liệu** (CBP manifest, sổ đăng ký nhà nước), không scrape nền tảng trung gian rồi bán lại.
+
+**Số điện thoại:** LinkedIn **không** cho số điện thoại — profile không có trường này, dưới ~5% thành viên có công khai và thường chỉ mở cho kết nối cấp 1; công cụ nào quảng cáo "lấy số trực tiếp từ LinkedIn" thực chất đang tra database riêng của họ. Đường đi thật của số điện thoại: trang liên hệ của công ty (số văn phòng), press release / PDF có chữ ký, danh bạ hội chợ, Google Business, hoặc mua từ nhà cung cấp dữ liệu. Vì vậy report tách rõ **số của công ty** (thấy trên web công ty) và **số của cá nhân** (hầu như không có; nếu có thì phải kèm đúng trang đã thấy).
 
 ---
 
@@ -177,9 +181,9 @@ Mọi report trả cho khách có 4 khối, theo thứ tự này. Đây là hợ
 
 **1. Khối công ty** — tên, website, LinkedIn, ngành, **năm thành lập, quy mô nhân sự, địa chỉ**, mô tả 1–2 câu. Kèm **kênh chung của công ty** (website, LinkedIn, điện thoại, email chung): chỉ giá trị, hai kênh một hàng, mỗi giá trị là link tới trang đã thấy nó.
 
-**2. Khối người liên quan** — tên, chức danh, bộ phận, chức danh trước đây nếu có, kênh liên hệ (link tới hồ sơ), ngày thấy lần cuối. **Không xếp hạng, không khuyến nghị nên gặp ai, không hướng dẫn cách tiếp cận.**
+**2. Khối người liên quan** — mỗi người một thẻ: tên, chức danh, bộ phận, chức danh trước đây nếu có, **mọi kênh gắn với người đó** (profile LinkedIn, email công bố kèm tên, điện thoại nếu có) và ngày thấy lần cuối. Một email công bố kèm tên **không được đứng riêng**: người dùng phải biết mình đang viết cho ai, nên email đó được gắn vào thẻ của người ấy — nếu người đó đã có thẻ từ LinkedIn thì gắn vào đúng thẻ đó. **Không xếp hạng, không khuyến nghị nên gặp ai, không hướng dẫn cách tiếp cận.**
 
-**3. Khối email bộ phận & theo vùng** — điện thoại, email bộ phận, email công bố theo vùng: cùng bố cục thẻ như khối người liên quan. **Không lên đầu**: đây không phải thông tin chính của công ty.
+**3. Khối email bộ phận** — chỉ còn email bộ phận / email không gắn được tên, cùng bố cục thẻ như khối người liên quan. **Không lên đầu**: đây không phải thông tin chính của công ty.
 
 **4. Khối nguồn** — danh sách URL đã đối chiếu, kèm ngày.
 

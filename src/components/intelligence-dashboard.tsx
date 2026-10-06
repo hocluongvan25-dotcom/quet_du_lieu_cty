@@ -44,6 +44,7 @@ import { LanguageSwitcher } from "@/components/language-switcher";
 import { SignOutButton } from "@/components/sign-out-button";
 import { WorkspaceNotice } from "@/components/workspace-notice";
 import { PeoplePanel } from "@/components/contact-intel";
+import { buildReportSections } from "@/lib/report-sections";
 import { DEMO_CREDITS, REPORT_COST, type WorkspaceSnapshot } from "@/lib/data/workspace-types";
 import { getCopy, normalizeLocale, type AppLocale } from "@/lib/i18n";
 
@@ -610,11 +611,10 @@ function CopyButton({ value, label, title, onCopy }: { value: string; label: str
 
 function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }: { locale: AppLocale; report: CompanyReport; onClose: () => void; onCopy: (value: string, label: string) => void; onRefresh: () => void; onArchive: () => void }) {
   const t = getCopy(locale);
-  // The company row only carries the company-level channels (website, LinkedIn,
-  // switchboard, general email). Department and regional/person emails are not
-  // the headline and go in their own block further down.
-  const topChannels = report.contacts.filter((contact) => (contact.identityMatch ?? "company_general") === "company_general");
-  const detailChannels = report.contacts.filter((contact) => contact.identityMatch && contact.identityMatch !== "company_general");
+  // The company row carries the company-level channels only. A channel that belongs
+  // to a person — whether it came from LinkedIn or from a published email with a name
+  // next to it — is rendered on that person's card, not as a loose address.
+  const { companyChannels: topChannels, departmentChannels: detailChannels, people } = buildReportSections(report);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-[#202233]/35 backdrop-blur-[1.5px]">
@@ -661,7 +661,7 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
             <div className="mt-3 flex flex-wrap gap-1.5">{report.signals.map((signal) => <span key={signal} className="rounded-full bg-[#F4F5F8] px-2 py-1 text-[10px] font-semibold text-[#6C7280]">{signal}</span>)}</div>
           </div>
 
-          {report.people && report.people.length > 0 ? <PeoplePanel locale={locale} people={report.people} onCopy={onCopy} /> : null}
+          {people.length > 0 ? <PeoplePanel locale={locale} people={people} onCopy={onCopy} /> : null}
 
           {detailChannels.length > 0 ? (
             <section className="mt-6">
