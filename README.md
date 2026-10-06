@@ -78,10 +78,20 @@ The app keeps working without `.env.local`; it stays in demo mode.
    supabase db push
    ```
 
-3. Put the project URL and anon key in `.env.local`.
+3. Copy `.env.example` to `.env.local` and fill in the project URL, the anon key and (server-side only) the service role key.
 4. Enable your chosen Supabase Auth providers.
 5. Create a private Storage bucket named `research-artifacts` for raw permitted HTML/PDF/screenshot artifacts.
 6. Add a scheduled job or Edge Function to delete expired artifacts and evidence based on `expires_at`.
+
+### Verify the connection
+
+```bash
+npm run supabase:check
+```
+
+The check reads `.env.local` and reports whether the URL and anon key belong to the same project, whether Auth is reachable and which providers are enabled, whether every table from the migration exists, and whether the private `research-artifacts` bucket is present. It exits non-zero when a check fails, so it can gate a deploy or a CI job.
+
+> `SUPABASE_SERVICE_ROLE_KEY` bypasses RLS for the entire project. Keep it server-side only: never prefix it with `NEXT_PUBLIC_`, never import it from a client component, and never commit it. `.env*` is gitignored; rotate any key that has been shared in plain text.
 
 > Before enabling live persistence, add Supabase Auth to the frontend and derive `organization_id` only from the authenticated user’s memberships. Never accept an organization ID from an untrusted browser request as authorization.
 
