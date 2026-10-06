@@ -115,8 +115,6 @@ export const copy = {
     drawer: {
       report: "Company Report",
       confidence: "Entity confidence",
-      verified: "Đã đối chiếu tốt",
-      review: "Cần kiểm tra thêm",
       detailChannels: "Email bộ phận & theo vùng",
       detailChannelsText: "Tìm thấy trên trang công khai của công ty, kèm nguồn và nhãn.",
       sources: "Nguồn đã kiểm tra",
@@ -126,8 +124,6 @@ export const copy = {
       archive: "Lưu report lâu hơn",
       export: "Xuất file",
       refresh: "Làm mới report",
-      verifiedLabel: "Đã xác minh",
-      unverifiedLabel: "Chưa xác minh",
     },
     team: {
       inviteTitle: "Mời thành viên mới",
@@ -289,8 +285,6 @@ export const copy = {
     drawer: {
       report: "Company Report",
       confidence: "Entity confidence",
-      verified: "Well cross-checked",
-      review: "Needs more review",
       detailChannels: "Department & regional emails",
       detailChannelsText: "Found on the company's public pages, with source and label.",
       sources: "Checked sources",
@@ -300,8 +294,6 @@ export const copy = {
       archive: "Keep this report longer",
       export: "Export",
       refresh: "Refresh report",
-      verifiedLabel: "Verified",
-      unverifiedLabel: "Unverified",
     },
     team: {
       inviteTitle: "Invite a new member",

@@ -8,29 +8,23 @@ import {
   Archive,
   ArrowUpRight,
   Bell,
-  BriefcaseBusiness,
   Check,
   ChevronDown,
   ChevronRight,
   CircleHelp,
-  CircleCheckBig,
   Clock3,
   Copy,
   CreditCard,
   Database,
   Download,
-  ExternalLink,
   FileSearch,
   Globe2,
   History,
   LayoutDashboard,
   Link2,
   LoaderCircle,
-  Mail,
   Menu,
-  MessageCircle,
   MoreHorizontal,
-  Phone,
   Plus,
   Search,
   Settings2,
@@ -44,7 +38,7 @@ import { CompanyReport, Contact, initialReports } from "@/lib/demo-data";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { SignOutButton } from "@/components/sign-out-button";
 import { WorkspaceNotice } from "@/components/workspace-notice";
-import { PeoplePanel, ProvenanceBadge } from "@/components/contact-intel";
+import { PeoplePanel } from "@/components/contact-intel";
 import { DEMO_CREDITS, REPORT_COST, type WorkspaceSnapshot } from "@/lib/data/workspace-types";
 import { getCopy, normalizeLocale, type AppLocale } from "@/lib/i18n";
 
@@ -152,14 +146,6 @@ function StatusPill({ status, locale }: { status: CompanyReport["status"]; local
   return <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFF4E5] px-2.5 py-1 text-[11px] font-semibold text-[#C47A16]"><span className="h-1.5 w-1.5 rounded-full bg-[#E49B31]" /> {labels.review}</span>;
 }
 
-function ContactIcon({ type, size = 17 }: { type: Contact["type"]; size?: number }) {
-  const className = "text-[#737889]";
-  if (type === "email") return <Mail size={size} className={className} />;
-  if (type === "phone") return <Phone size={size} className={className} />;
-  if (type === "linkedin") return <BriefcaseBusiness size={size} className={className} />;
-  if (type === "whatsapp") return <MessageCircle size={size} className={className} />;
-  return <Globe2 size={size} className={className} />;
-}
 
 export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnapshot }) {
   const params = useParams<{ locale?: string }>();
@@ -571,66 +557,29 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
 }
 
 /**
- * One channel as a small inline chip: icon, value, its confidence / policy labels,
- * the verified mark and a copy button. The value links to the page it was seen on,
- * and the tooltip carries the full label, context, source and URL — so the row stays
- * one line while nothing loses its provenance. `showLabel` is used in the lower block,
- * where a bare icon would not say which department or person the address belongs to.
+ * Where a channel value points. Email addresses and handles have no URL of their
+ * own, so they link to the page they were seen on; a phone number is not a link.
  */
-function ChannelChip({ contact, locale, onCopy, showLabel = false }: { contact: Contact; locale: AppLocale; onCopy: (value: string, label: string) => void; showLabel?: boolean }) {
-  const t = getCopy(locale);
-  const canCopy = contact.value !== "Chưa xác minh" && contact.value !== "Not verified";
-  const showIdentity = contact.identityMatch && contact.identityMatch !== "company_general" ? contact.identityMatch : undefined;
-  const provenance = [contact.label, contact.via, contact.source, contact.sourceUrl].filter(Boolean).join(" · ");
-  const value = contact.sourceUrl ? (
-    <a href={contact.sourceUrl} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-[11px] font-bold text-[#3B3F4F] hover:text-[#5D53E8]" title={provenance}>
+function channelHref(contact: Contact): string | null {
+  if (contact.type === "phone" || !contact.value) return null;
+  if (contact.sourceUrl) return contact.sourceUrl;
+  if (/^https?:\/\//i.test(contact.value)) return contact.value;
+  return contact.value.includes(".") ? `https://${contact.value}` : null;
+}
+
+/** The value as plain content: a link when there is somewhere to go, text when not. */
+function ChannelValue({ contact, className = "" }: { contact: Contact; className?: string }) {
+  const href = channelHref(contact);
+  if (!href) return <span className={`${className} truncate`}>{contact.value}</span>;
+  return (
+    <a href={href} target="_blank" rel="noreferrer" title={contact.source} className={`${className} truncate hover:text-[#5D53E8] hover:underline`}>
       {contact.value}
     </a>
-  ) : (
-    <span className="min-w-0 flex-1 truncate text-[11px] font-bold text-[#3B3F4F]">{contact.value}</span>
-  );
-  const state = <ProvenanceBadge locale={locale} certainty={contact.certainty} identityMatch={showIdentity} policy={contact.policy} />;
-  const mark = (
-    <span className="shrink-0" role="img" aria-label={contact.verified ? t.drawer.verifiedLabel : t.drawer.unverifiedLabel} title={contact.verified ? t.drawer.verifiedLabel : t.drawer.unverifiedLabel}>
-      {contact.verified ? <CircleCheckBig size={11} className="text-[#209170]" /> : <AlertCircle size={11} className="text-[#A0A5B1]" />}
-    </span>
-  );
-  const copy = (
-    <button type="button" disabled={!canCopy} onClick={() => onCopy(contact.value, contact.label)} title={t.common.copy} aria-label={`${t.common.copy} ${contact.label}`} className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[#6257E7] transition hover:bg-[#F2F0FF] disabled:cursor-not-allowed disabled:opacity-35"><Copy size={11} /></button>
-  );
-
-  if (!showLabel) {
-    return (
-      <li className="flex min-w-0 items-center gap-1.5 rounded-lg border border-[#E9EBF0] bg-white py-1 pl-2 pr-1" title={provenance}>
-        <ContactIcon type={contact.type} size={12} />
-        {value}
-        {state}
-        {mark}
-        {copy}
-      </li>
-    );
-  }
-
-  return (
-    <li className="min-w-0 rounded-lg border border-[#E9EBF0] bg-white px-2 py-1.5" title={provenance}>
-      <div className="flex items-center gap-1.5">
-        <ContactIcon type={contact.type} size={12} />
-        <span className="min-w-0 flex-1 truncate text-[10px] font-semibold text-[#9297A4]" title={contact.label}>{contact.label}</span>
-        {state}
-        {mark}
-        {copy}
-      </div>
-      <div className="mt-0.5 flex items-center gap-1.5 pl-[18px]">
-        {value}
-        {contact.via ? <span className="min-w-0 truncate text-[9px] text-[#A1A5B1]" title={contact.via}>· {contact.via}</span> : null}
-      </div>
-    </li>
   );
 }
 
 function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }: { locale: AppLocale; report: CompanyReport; onClose: () => void; onCopy: (value: string, label: string) => void; onRefresh: () => void; onArchive: () => void }) {
   const t = getCopy(locale);
-  const confidenceTone = report.confidence >= 80 ? "text-[#168466] bg-[#EAF8F3]" : "text-[#C37B18] bg-[#FFF4E5]";
   // The company row only carries the company-level channels (website, LinkedIn,
   // switchboard, general email). Department and regional/person emails are not
   // the headline and go in their own block further down.
@@ -652,17 +601,19 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
             <div className="min-w-0 flex-1">
               <h2 className="truncate text-[20px] font-bold tracking-[-0.04em] text-[#2D3040]">{report.companyName}</h2>
               <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#7C8290]">
-                <span className="inline-flex items-center gap-1"><Globe2 size={12} /> {report.country}</span>
+                <span>{report.country}</span>
                 <span className="text-[#CFD1D8]">•</span>
                 <span>{report.industry}</span>
                 {report.foundedYear ? <><span className="text-[#CFD1D8]">•</span><span>{locale === "vi" ? "Thành lập" : "Founded"} {report.foundedYear}</span></> : null}
                 {report.headcount ? <><span className="text-[#CFD1D8]">•</span><span>{report.headcount}</span></> : null}
-                {report.address ? <><span className="text-[#CFD1D8]">•</span><span className="inline-flex items-center gap-1"><Users size={12} /> {report.address}</span></> : null}
+                {report.address ? <><span className="text-[#CFD1D8]">•</span><span>{report.address}</span></> : null}
               </p>
               {topChannels.length > 0 ? (
-                <ul className="mt-2.5 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                <ul className="mt-2.5 grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
                   {topChannels.map((contact) => (
-                    <ChannelChip key={`${contact.label}-${contact.value}`} contact={contact} locale={locale} onCopy={onCopy} />
+                    <li key={`${contact.label}-${contact.value}`} className="min-w-0 text-[11px] font-bold text-[#3B3F4F]" title={contact.label}>
+                      <ChannelValue contact={contact} />
+                    </li>
                   ))}
                 </ul>
               ) : null}
@@ -672,29 +623,32 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
           <div className="mt-5 rounded-2xl border border-[#E8EAF0] bg-white p-4">
             <div className="flex items-start justify-between gap-4">
               <div><p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#9BA0AF]">{t.drawer.confidence}</p><p className="mt-1 text-[25px] font-bold tracking-[-0.05em] text-[#343746]">{report.confidence}<span className="text-sm text-[#858B99]">/100</span></p></div>
-              <span className={`rounded-full px-2.5 py-1.5 text-[11px] font-bold ${confidenceTone}`}>{report.confidence >= 80 ? t.drawer.verified : t.drawer.review}</span>
             </div>
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#EDF0F3]"><div className={`h-full rounded-full ${report.confidence >= 80 ? "bg-[#32AD83]" : "bg-[#E9A143]"}`} style={{ width: `${report.confidence}%` }} /></div>
             <p className="mt-3 text-[11px] leading-5 text-[#757B8A]">{report.description}</p>
             <div className="mt-3 flex flex-wrap gap-1.5">{report.signals.map((signal) => <span key={signal} className="rounded-full bg-[#F4F5F8] px-2 py-1 text-[10px] font-semibold text-[#6C7280]">{signal}</span>)}</div>
           </div>
 
-          {report.people && report.people.length > 0 ? <PeoplePanel locale={locale} people={report.people} onCopy={onCopy} /> : null}
+          {report.people && report.people.length > 0 ? <PeoplePanel locale={locale} people={report.people} /> : null}
 
           {detailChannels.length > 0 ? (
             <section className="mt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-[13px] font-bold text-[#333747]">{t.drawer.detailChannels}</h3>
-                  <p className="mt-0.5 text-[10px] text-[#8A90A0]">{t.drawer.detailChannelsText}</p>
+                  <h3 className="text-[14px] font-bold text-[#333747]">{t.drawer.detailChannels}</h3>
+                  <p className="mt-1 text-[11px] text-[#8A90A0]">{t.drawer.detailChannelsText}</p>
                 </div>
-                <span className="rounded-full bg-[#F4F5F8] px-2 py-0.5 text-[10px] font-bold text-[#6C7280]">{detailChannels.length}</span>
+                <span className="rounded-full bg-[#F0EEFF] px-2 py-1 text-[10px] font-bold text-[#6257E7]">{detailChannels.length}</span>
               </div>
-              <ul className="mt-2.5 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+              <div className="mt-3 space-y-2">
                 {detailChannels.map((contact) => (
-                  <ChannelChip key={`${contact.label}-${contact.value}`} contact={contact} locale={locale} onCopy={onCopy} showLabel />
+                  <article key={`${contact.label}-${contact.value}`} className="rounded-xl border border-[#E9EBF0] bg-white p-3.5">
+                    <h4 className="text-[13px] font-bold text-[#333747]">{contact.label}</h4>
+                    <ChannelValue contact={contact} className="mt-1 block text-[11px] font-bold text-[#3B3F4F]" />
+                    {contact.via ? <p className="mt-0.5 text-[10px] text-[#8A90A0]">{contact.via}</p> : null}
+                  </article>
                 ))}
-              </ul>
+              </div>
             </section>
           ) : null}
 
@@ -704,17 +658,16 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
             {report.sources.map((source) => (
               <div key={source.url} className="group rounded-xl border border-[#E9EBF0] bg-white p-3 transition hover:border-[#D8D3FC] hover:bg-[#FCFBFF]">
                 <a href={source.url} target="_blank" rel="noreferrer" className="block">
-                  <div className="flex items-start justify-between gap-2"><span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-[#6A7080]">{source.kind === "social" ? <BriefcaseBusiness size={13} className="text-[#5C70CC]" /> : source.kind === "news" ? <FileSearch size={13} className="text-[#E89C43]" /> : <Globe2 size={13} className="text-[#6C63E9]" />}{source.label}</span><ExternalLink size={13} className="text-[#A1A6B2] group-hover:text-[#655BE7]" /></div>
+                  <span className="block text-[10px] font-bold text-[#6A7080]">{source.label}</span>
                   <p className="mt-2 truncate text-[10px] text-[#9095A3]">{source.url.replace(/^https?:\/\//, "")}</p>
                 </a>
-                <div className="mt-2 flex items-center justify-between gap-2">{source.verified ? <span className="inline-flex items-center gap-1 text-[9px] font-bold text-[#209170]"><Check size={11} /> Evidence verified</span> : <span />}<button type="button" onClick={() => onCopy(source.url, source.label)} title={t.common.copy} aria-label={`${t.common.copy} ${source.label}`} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-bold text-[#6257E7] hover:bg-[#F2F0FF]"><Copy size={12} />{t.common.copy}</button></div>
               </div>
             ))}
           </div>
 
           <div className="mt-6 rounded-2xl border border-[#E5E1FE] bg-[#F9F8FF] p-4">
-            <div className="flex gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-[#655BE8] shadow-sm"><Clock3 size={17} /></div><div><p className="text-[12px] font-bold text-[#484064]">{t.drawer.snapshot} {report.daysLeft} {t.common.days}</p><p className="mt-1 text-[10px] leading-4 text-[#77738D]">{locale === "vi" ? `Lưu đến ${report.expiresAt}. ` : `Stored until ${report.expiresAt}. `}{t.drawer.snapshotText}</p></div></div>
-            <button type="button" onClick={onArchive} className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-[#5E53E8] hover:text-[#4035CA]"><Archive size={14} /> {t.drawer.archive}</button>
+            <div className="flex gap-3"><div><p className="text-[12px] font-bold text-[#484064]">{t.drawer.snapshot} {report.daysLeft} {t.common.days}</p><p className="mt-1 text-[10px] leading-4 text-[#77738D]">{locale === "vi" ? `Lưu đến ${report.expiresAt}. ` : `Stored until ${report.expiresAt}. `}{t.drawer.snapshotText}</p></div></div>
+            <button type="button" onClick={onArchive} className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-[#5E53E8] hover:text-[#4035CA]">{t.drawer.archive}</button>
           </div>
         </div>
 

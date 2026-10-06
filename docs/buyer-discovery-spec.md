@@ -175,13 +175,15 @@ Chỉ tính credit khi có kết quả mới; job lỗi phải hoàn credit (sch
 
 Mọi report trả cho khách có 4 khối, theo thứ tự này. Đây là hợp đồng với người dùng, không phải gợi ý trình bày.
 
-**1. Khối công ty** — tên, website, LinkedIn, ngành, **năm thành lập, quy mô nhân sự, địa chỉ**, mô tả 1–2 câu.
+**1. Khối công ty** — tên, website, LinkedIn, ngành, **năm thành lập, quy mô nhân sự, địa chỉ**, mô tả 1–2 câu. Kèm **kênh chung của công ty** (website, LinkedIn, điện thoại, email chung): chỉ giá trị, hai kênh một hàng, mỗi giá trị là link tới trang đã thấy nó.
 
-**2. Khối người liên quan** — tên, chức danh, bộ phận, chức danh trước đây nếu có, nguồn + ngày thấy lần cuối, và kênh liên hệ kèm nhãn. **Không xếp hạng, không khuyến nghị nên gặp ai, không hướng dẫn cách tiếp cận.**
+**2. Khối người liên quan** — tên, chức danh, bộ phận, chức danh trước đây nếu có, kênh liên hệ (link tới hồ sơ), ngày thấy lần cuối. **Không xếp hạng, không khuyến nghị nên gặp ai, không hướng dẫn cách tiếp cận.**
 
-**3. Khối kênh công ty** — điện thoại, email chung, email bộ phận, email công bố theo vùng. Mỗi kênh: giá trị, nguồn (URL), `certainty`, `identity_match`, và **được phép làm gì** (`policy`). Trên giao diện, **kênh chung của công ty** (website, LinkedIn, điện thoại, email chung) nằm ngay trong khối công ty — chip nhỏ dùng icon, **hai kênh một hàng** (lưới 2 cột), giá trị link thẳng tới trang đã thấy nó. Nhãn tin cậy, người/bộ phận và quyền hiển thị bằng **icon nhỏ**, chữ đầy đủ nằm trong tooltip — chữ dài như "Cần kiểm tra mailbox" rộng hơn cả giá trị nó ghi chú. **Email bộ phận và email theo vùng/cá nhân không lên đầu**: chúng nằm ở một mục riêng phía dưới (sau khối người liên quan), nơi mỗi chip ghi rõ bộ phận hay người mà địa chỉ đó thuộc về.
+**3. Khối email bộ phận & theo vùng** — điện thoại, email bộ phận, email công bố theo vùng: cùng bố cục thẻ như khối người liên quan. **Không lên đầu**: đây không phải thông tin chính của công ty.
 
 **4. Khối nguồn** — danh sách URL đã đối chiếu, kèm ngày.
+
+**Giao diện report: chỉ nội dung.** Không icon, không badge, không dòng trạng thái trong report. Nhãn tin cậy (`certainty`), người/bộ phận (`identity_match`) và quyền (`policy`) **vẫn là một phần của model** và vẫn hiển thị đầy đủ ở danh sách buyer và trong file CSV — nhưng trong report người dùng chỉ đọc nội dung. Mỗi giá trị là một link tới trang đã thấy nó, và khối nguồn liệt kê lại toàn bộ trang đã kiểm.
 
 Không hiển thị danh sách "không tìm thấy" cho người dùng. Việc **loại trừ** vẫn phải diễn ra (giá trị của bên thứ ba, số điện thoại của đơn vị vận hành web store, email đuôi tên file ảnh…) nhưng là việc của hệ thống, không phải nội dung để đọc: người dùng cần danh sách đã sạch, không cần biết hệ thống đã bỏ qua những gì.
 
@@ -190,7 +192,7 @@ Quy tắc bắt buộc:
 - Không giá trị nào được xuất hiện mà thiếu nguồn hoặc thiếu nhãn tin cậy.
 - Thiếu thì để trống. Không suy diễn, không sinh email theo pattern ở tầng này, và cũng không liệt kê những gì không tìm được.
 - **Ranh giới sản phẩm:** hệ thống chỉ TÌM thông tin liên quan và ghi nguồn. Chọn ai, liên hệ thế nào, thứ tự ưu tiên ra sao là việc của người dùng — report không chứa lời khuyên bán hàng.
-- Mỗi kênh chỉ mang một nhãn tin cậy (`Đã thấy công bố` / `Chưa kiểm lại` / `Suy luận theo pattern`) và một quyền (`Gửi được` / `Cần kiểm tra mailbox trước khi gửi` / `Liên hệ thủ công` / `Cần bạn xác nhận`).
+- Mỗi kênh vẫn mang đúng một nhãn tin cậy và một quyền trong model (và trong CSV); report không hiển thị chúng.
 
 Ví dụ chuẩn đang chạy: `src/lib/demo-mariani.ts` (Mariani Packing, đối chiếu 06/10/2026) — gõ `Mariani` trong demo để mở.
 
