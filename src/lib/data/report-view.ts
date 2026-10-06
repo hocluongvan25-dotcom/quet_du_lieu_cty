@@ -84,7 +84,7 @@ function dayStamp(value: string) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function formatMoment(value: string, locale: AppLocale) {
+export function formatMoment(value: string, locale: AppLocale) {
   const date = dayStamp(value);
   if (!date) return "-";
 
@@ -106,7 +106,7 @@ function formatMoment(value: string, locale: AppLocale) {
   return new Intl.DateTimeFormat(locale === "vi" ? "vi-VN" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(date);
 }
 
-function formatDate(value: string, locale: AppLocale) {
+export function formatDate(value: string, locale: AppLocale) {
   const date = dayStamp(value);
   if (!date) return "-";
   return new Intl.DateTimeFormat(locale === "vi" ? "vi-VN" : "en-GB", { dateStyle: "short" }).format(date);

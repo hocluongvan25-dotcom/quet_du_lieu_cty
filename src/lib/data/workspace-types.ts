@@ -34,6 +34,32 @@ export type WorkspaceSnapshot = {
   reports: CompanyReport[];
 };
 
+export type WorkspaceMember = {
+  userId: string;
+  name: string;
+  email: string | null;
+  role: string;
+  initials: string;
+  joinedLabel: string;
+  reportsCreated: number;
+  isSelf: boolean;
+};
+
+export type ReportChangeKind = "added" | "removed" | "changed";
+
+export type ReportChange = {
+  id: string;
+  companyName: string;
+  fieldName: string;
+  fieldLabel: string;
+  kind: ReportChangeKind;
+  previousValue: string | null;
+  newValue: string | null;
+  detectedAt: string;
+  detectedLabel: string;
+  reportId: string | null;
+};
+
 /** How many credits one Company Report costs. Mirrors the retention default. */
 export const REPORT_COST = 5;
 

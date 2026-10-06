@@ -4,7 +4,19 @@ import { getSupabasePublicConfig } from "@/lib/supabase/config";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import type { AppLocale } from "@/lib/i18n";
 import { toCompanyReportView, type CompanyReportRow, type SourceEvidenceRow } from "./report-view";
-import { emptyWorkspace, type WorkspaceAccount, type WorkspaceSnapshot } from "./workspace-types";
+import {
+  toReportChange,
+  toWorkspaceMember,
+  type ReportChangeRow,
+  type WorkspaceMemberRow,
+} from "./activity-view";
+import {
+  emptyWorkspace,
+  type ReportChange,
+  type WorkspaceAccount,
+  type WorkspaceMember,
+  type WorkspaceSnapshot,
+} from "./workspace-types";
 
 /**
  * Server-side workspace loader.
@@ -163,3 +175,85 @@ export const loadWorkspace = cache(async (locale: AppLocale): Promise<WorkspaceS
     return { state: "unavailable", account: null, reports: [] };
   }
 });
+
+
+const CHANGE_COLUMNS =
+  "id, company_report_id, company_name, field_name, change_kind, previous_value, new_value, detected_at";
+
+/**
+ * Members of the caller's workspace, resolved through a definer function
+ * because the email lives in `auth.users`.
+ */
+export async function fetchWorkspaceMembers(
+  supabase: SupabaseClient,
+  locale: AppLocale,
+  selfId: string | null,
+): Promise<WorkspaceMember[]> {
+  const { data, error } = await supabase.rpc("workspace_members");
+  if (error) throw new Error(error.message);
+
+  return ((data ?? []) as unknown as WorkspaceMemberRow[]).map((row) =>
+    toWorkspaceMember(row, locale, selfId),
+  );
+}
+
+/** Detected contact/website changes for the caller's workspace, newest first. */
+export async function fetchReportChanges(
+  supabase: SupabaseClient,
+  locale: AppLocale,
+  limit = 40,
+): Promise<ReportChange[]> {
+  const { data, error } = await supabase
+    .from("report_changes")
+    .select(CHANGE_COLUMNS)
+    .order("detected_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw new Error(error.message);
+
+  return ((data ?? []) as unknown as ReportChangeRow[]).map((row) => toReportChange(row, locale));
+}
+
+export type ActivityLoad<T> = { available: boolean; data: T };
+
+/** Shared guard: returns demo fallbacks when the project is not reachable. */
+async function withWorkspace<T>(
+  locale: AppLocale,
+  query: (supabase: SupabaseClient, account: WorkspaceAccount) => Promise<T>,
+  fallback: T,
+): Promise<ActivityLoad<T>> {
+  if (!getSupabasePublicConfig()) return { available: false, data: fallback };
+
+  try {
+    const supabase = await getSupabaseServerClient();
+    if (!supabase) return { available: false, data: fallback };
+
+    const { data, error } = await supabase.auth.getUser();
+    if (error && error.name !== "AuthSessionMissingError") return { available: false, data: fallback };
+
+    const user = data.user;
+    if (!user) return { available: false, data: fallback };
+
+    const account = await fetchWorkspaceAccount(supabase, user);
+    if (!account) return { available: false, data: fallback };
+
+    return { available: true, data: await query(supabase, account) };
+  } catch {
+    return { available: false, data: fallback };
+  }
+}
+
+export function loadWorkspaceMembers(locale: AppLocale) {
+  return withWorkspace<WorkspaceMember[]>(
+    locale,
+    async (supabase, account) => {
+      const { data } = await supabase.auth.getUser();
+      return fetchWorkspaceMembers(supabase, locale, data.user?.id ?? account.userId);
+    },
+    [],
+  );
+}
+
+export function loadReportChanges(locale: AppLocale) {
+  return withWorkspace<ReportChange[]>(locale, (supabase) => fetchReportChanges(supabase, locale), []);
+}

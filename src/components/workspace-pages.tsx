@@ -17,7 +17,6 @@ import {
   Filter,
   Globe2,
   History,
-  MoreHorizontal,
   Plus,
   Search,
   ShieldCheck,
@@ -93,35 +92,6 @@ export function ArchivePage() {
       </div>
     </WorkspaceShell>
   );
-}
-
-export function HistoryPage() {
-  const { locale, t } = useWorkspaceCopy();
-  const events = locale === "vi"
-    ? [
-        ["Hôm nay, 09:42", "Nova Distribution Ltd.", "Đã phát hiện email kinh doanh mới", "sales@novadistribution.example đã được xác minh từ trang Contact."],
-        ["02/10/2026", "Velar Foods GmbH", "Confidence giảm từ 82 xuống 67", "Phát hiện hai company profiles có tên và quốc gia gần giống nhau."],
-        ["28/09/2026", "Hoshi Components Co.", "Website catalog được cập nhật", "Đã thay đổi URL catalogue sản phẩm và giữ snapshot trước đó."],
-      ]
-    : [
-        ["Today, 09:42", "Nova Distribution Ltd.", "New business email detected", "sales@novadistribution.example was verified from the Contact page."],
-        ["02 Oct 2026", "Velar Foods GmbH", "Confidence changed from 82 to 67", "Two company profiles with similar names and countries were discovered."],
-        ["28 Sep 2026", "Hoshi Components Co.", "Website catalogue updated", "The product catalogue URL changed and the previous snapshot was retained."],
-      ];
-  return (
-    <WorkspaceShell active="history"><div className="mx-auto max-w-[1000px] px-5 py-7 sm:px-7 lg:px-9 lg:py-9"><PageIntro title={t.pages.history.title} subtitle={t.pages.history.subtitle} /><section className="rounded-[21px] border border-[#EAECF1] bg-white p-5 sm:p-6"><div className="mb-6 flex items-center gap-2"><div className="rounded-lg bg-[#F0EEFF] p-2 text-[#6359E8]"><History size={17} /></div><div><p className="text-[13px] font-bold text-[#343747]">{locale === "vi" ? "Dòng thời gian evidence" : "Evidence timeline"}</p><p className="mt-0.5 text-[10px] text-[#8C92A0]">{locale === "vi" ? "Các thay đổi được gắn với report snapshot tương ứng." : "Every change is linked to its matching report snapshot."}</p></div></div><div className="relative ml-3 border-l border-[#E4E6EF] pl-6">{events.map((event, index) => <article key={event[0]} className="relative pb-7 last:pb-0"><span className={`absolute -left-[31px] top-1.5 h-3 w-3 rounded-full border-[3px] border-white ${index === 0 ? "bg-[#665BE8] shadow-[0_0_0_1px_#dcd8ff]" : "bg-[#B8BDC8]"}`} /><div className="flex flex-wrap items-center gap-2"><span className="text-[10px] font-bold text-[#999FAD]">{event[0]}</span><span className="rounded-full bg-[#F3F4F7] px-2 py-0.5 text-[9px] font-bold text-[#6F7584]">{event[1]}</span></div><h3 className="mt-2 text-[13px] font-bold text-[#383B4A]">{event[2]}</h3><p className="mt-1 max-w-[650px] text-[11px] leading-5 text-[#7B8190]">{event[3]}</p><button type="button" className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold text-[#6257E7]">{locale === "vi" ? "Mở snapshot" : "Open snapshot"}<ArrowUpRight size={12} /></button></article>)}</div></section></div></WorkspaceShell>
-  );
-}
-
-export function TeamPage() {
-  const { locale, t } = useWorkspaceCopy();
-  const [notice, setNotice] = useState("");
-  const members = [
-    { initials: "AN", name: "Anh Nguyen", email: "anh@seekora.demo", role: locale === "vi" ? "Owner" : "Owner", color: "#218A72" },
-    { initials: "ML", name: "Mai Le", email: "mai@seekora.demo", role: locale === "vi" ? "Researcher" : "Researcher", color: "#655BE8" },
-    { initials: "TH", name: "Thanh Ho", email: "thanh@seekora.demo", role: locale === "vi" ? "Viewer" : "Viewer", color: "#D2803B" },
-  ];
-  return <WorkspaceShell active="team"><div className="mx-auto max-w-[1200px] px-5 py-7 sm:px-7 lg:px-9 lg:py-9"><PageIntro title={t.pages.team.title} subtitle={t.pages.team.subtitle} action={<button type="button" onClick={() => { setNotice(locale === "vi" ? "Lời mời đã sẵn sàng để gửi." : "Your invite is ready to send."); setTimeout(() => setNotice(""), 2300); }} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#5D53E8] px-4 text-[12px] font-bold text-white hover:bg-[#4E44D7]"><Plus size={15} />{t.pages.team.action}</button>} /><div className="grid gap-4 md:grid-cols-3">{members.map((member) => <section key={member.email} className="rounded-[20px] border border-[#E8EAF0] bg-white p-5 shadow-[0_8px_28px_rgba(31,38,56,0.025)]"><div className="flex items-start justify-between"><div className="flex h-11 w-11 items-center justify-center rounded-full text-[12px] font-bold" style={{ background: `${member.color}18`, color: member.color }}>{member.initials}</div><button type="button" className="rounded-lg p-1.5 text-[#9BA0AC] hover:bg-[#F5F6F8]"><MoreHorizontal size={18} /></button></div><h2 className="mt-4 text-[14px] font-bold text-[#343746]">{member.name}</h2><p className="mt-1 text-[11px] text-[#898F9E]">{member.email}</p><div className="mt-4 flex items-center justify-between border-t border-[#EEF0F4] pt-3"><span className="rounded-full bg-[#F1F0FF] px-2 py-1 text-[10px] font-bold text-[#6257E7]">{member.role}</span><span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#218B70]"><span className="h-1.5 w-1.5 rounded-full bg-[#28A984]" />{t.common.active}</span></div></section>)}</div><section className="mt-5 rounded-[20px] border border-[#E9E6FB] bg-[#FAF9FF] p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex gap-3"><div className="rounded-xl bg-white p-2.5 text-[#6257E7] shadow-sm"><ShieldCheck size={18} /></div><div><h2 className="text-[13px] font-bold text-[#403D59]">{locale === "vi" ? "Phân quyền theo workspace" : "Workspace-based access"}</h2><p className="mt-1 text-[11px] leading-4 text-[#77738D]">{locale === "vi" ? "Owner và Admin quản lý credits, retention và thành viên. Researcher chỉ tạo report trong workspace của mình." : "Owners and admins manage credits, retention, and members. Researchers can only create reports in their own workspace."}</p></div></div><button type="button" className="w-fit text-[11px] font-bold text-[#5F54E6]">{locale === "vi" ? "Xem role matrix" : "View role matrix"}</button></div></section>{notice ? <div className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-[#2E2B47] px-4 py-3 text-[12px] font-medium text-white shadow-xl">{notice}</div> : null}</div></WorkspaceShell>;
 }
 
 export function BillingPage() {

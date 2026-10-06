@@ -66,8 +66,13 @@ for (const name of migrationFiles) {
 
   // PGlite ships without pgcrypto; Supabase has it. gen_random_uuid() is core
   // since Postgres 13, so the extension line is the only thing to skip.
-  if (sql.includes('create extension if not exists "pgcrypto"')) {
-    sql = sql.replace(/create extension if not exists "pgcrypto";/, "-- pgcrypto skipped: core in PG13+");
+  // PGlite ships a small extension set; Supabase provides these. The lines are
+  // dropped from the harness run only.
+  for (const extension of ["pgcrypto", "pg_cron", "pg_net"]) {
+    const pattern = new RegExp(`create extension if not exists "?${extension}"?;`, "i");
+    if (pattern.test(sql)) {
+      sql = sql.replace(pattern, `-- ${extension} skipped in the local harness`);
+    }
   }
 
   try {
@@ -84,7 +89,6 @@ await db.exec(`
   grant usage on schema public to anon, authenticated, service_role;
   grant all on all tables in schema public to anon, authenticated, service_role;
   grant all on all sequences in schema public to anon, authenticated, service_role;
-  grant all on all functions in schema public to anon, authenticated, service_role;
 `);
 
 const asUser = (userId) => db.query("select set_config('request.jwt.claim.sub', $1, false)", [userId]);
@@ -211,6 +215,132 @@ await db.query("select set_config('request.jwt.claim.sub', '', false)");
 const anonymous = await expectFailure("select public.bootstrap_workspace('Anon')", [], "authentication required");
 check("anonymous caller rejected", anonymous.ok, anonymous.message);
 
+
+section("change monitoring");
+await db.query("update public.organizations set credits_balance = 50 where id = $1", [orgId]);
+await asUser(userA);
+const secondReportId = (
+  await db.query("select public.complete_research_job($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8) as id", [
+    orgId,
+    "Nova Distribution Ltd.",
+    "https://novadistribution.example",
+    "Singapore",
+    JSON.stringify({
+      company_name: "Nova Distribution Ltd.",
+      country: "Singapore",
+      industry: "Distribution",
+      official_website: "https://novadistribution.com",
+      public_business_phone: "+65 6123 4820",
+      confidence: 88,
+    }),
+    JSON.stringify([
+      { kind: "website", source_label: "Official website", source_url: "https://novadistribution.com", field_name: "official_website", is_verified: true },
+    ]),
+    5,
+    30,
+  ])
+).rows[0].id;
+
+const changeRows = (
+  await db.query(
+    "select field_name, change_kind, previous_value, new_value from public.report_changes where company_report_id = $1 order by field_name",
+    [secondReportId],
+  )
+).rows;
+const changeByField = new Map(changeRows.map((row) => [row.field_name, row]));
+
+check("website change detected", changeByField.get("official_website")?.change_kind === "changed", JSON.stringify(changeByField.get("official_website")));
+check("previous website kept", changeByField.get("official_website")?.previous_value === "https://novadistribution.example");
+check("new website kept", changeByField.get("official_website")?.new_value === "https://novadistribution.com");
+check("dropped email marked removed", changeByField.get("public_business_email")?.change_kind === "removed" && changeByField.get("public_business_email")?.new_value === null, JSON.stringify(changeByField.get("public_business_email")));
+check("new phone marked added", changeByField.get("public_business_phone")?.change_kind === "added", JSON.stringify(changeByField.get("public_business_phone")));
+check("confidence move detected", changeByField.get("confidence")?.previous_value === "94" && changeByField.get("confidence")?.new_value === "88");
+check("unchanged fields are not recorded", !changeByField.has("country") && !changeByField.has("industry"), [...changeByField.keys()].join(","));
+check("one row per changed field", changeRows.length === 4, `${changeRows.length} rows`);
+check("previous snapshot is linked", (
+  await db.query("select previous_report_id from public.report_changes where company_report_id = $1 limit 1", [secondReportId])
+).rows[0].previous_report_id === reportId);
+check("a first snapshot records nothing", (await db.query("select count(*)::int as n from public.report_changes where company_report_id = $1", [reportId])).rows[0].n === 0);
+
+section("team members");
+const userC = (await db.query("insert into auth.users (email) values ('third@example.com') returning id")).rows[0].id;
+await db.query("insert into public.organization_members (organization_id, user_id, role) values ($1, $2, 'member')", [orgId, userC]);
+
+const membersA = (await db.query("select * from public.workspace_members()")).rows;
+check("workspace lists every member", membersA.length === 2, `${membersA.length} members`);
+check("owner sorted first", membersA[0].role === "owner" && membersA[0].email === "owner@example.com");
+check("roles included", membersA.some((member) => member.role === "member"));
+check("research counts per member", membersA.find((member) => member.email === "owner@example.com")?.reports_created === 3, String(membersA.find((member) => member.email === "owner@example.com")?.reports_created));
+check("emails only for own workspace", membersA.every((member) => member.email !== "other@example.com"));
+
+await asUser(userB);
+const membersB = (await db.query("select * from public.workspace_members()")).rows;
+check("another workspace sees only its own members", membersB.length === 1 && membersB[0].email === "other@example.com", JSON.stringify(membersB.map((m) => m.email)));
+
+section("retention cleanup");
+await asUser(userA);
+const artifactPath = `artifacts/novadistribution/${secondReportId}.html`;
+await db.query("update public.source_evidence set artifact_storage_path = $2 where company_report_id = $1", [secondReportId, artifactPath]);
+await db.query("update public.source_evidence set expires_at = now() - interval '1 day' where company_report_id = $1", [secondReportId]);
+await db.query("update public.company_reports set expires_at = now() - interval '1 day' where id = $1", [secondReportId]);
+
+const paths = (await db.query("select storage_path from public.retention_artifact_paths(100) where storage_path = $1", [artifactPath])).rows;
+check("expired artifact path listed for deletion", paths.length === 1, JSON.stringify(paths));
+
+const withoutObjects = (await db.query("select * from public.purge_expired_retention('{}'::text[])")).rows[0];
+check("rows kept while the object still exists", withoutObjects.deleted_evidence === 0 && withoutObjects.deleted_reports === 0, JSON.stringify(withoutObjects));
+check("report survives an unfinished object deletion", (await db.query("select count(*)::int as n from public.company_reports where id = $1", [secondReportId])).rows[0].n === 1);
+
+const withObjects = (await db.query("select * from public.purge_expired_retention($1::text[])", [[artifactPath]])).rows[0];
+check("expired evidence removed once the object is gone", withObjects.deleted_evidence === 1, JSON.stringify(withObjects));
+check("expired starter snapshot removed with it", withObjects.deleted_reports === 1, JSON.stringify(withObjects));
+const survivingChanges = (await db.query("select company_report_id, previous_report_id from public.report_changes where company_name = 'Nova Distribution Ltd.'")).rows;
+check(
+  "change history survives the deleted snapshot",
+  survivingChanges.length === 4 &&
+    survivingChanges.every((row) => row.company_report_id === null) &&
+    survivingChanges.every((row) => row.previous_report_id === reportId),
+  JSON.stringify(survivingChanges[0]),
+);
+check("other snapshots untouched", (await db.query("select count(*)::int as n from public.company_reports where id = $1", [reportId])).rows[0].n === 1);
+
+section("retention schedule");
+let cronGuard = null;
+try {
+  await db.query("select public.schedule_retention_cron('https://app.example/api/maintenance/retention', 'secret')");
+} catch (error) {
+  cronGuard = error.message;
+}
+check("schedule helper refuses to run without pg_cron", Boolean(cronGuard && cronGuard.includes("pg_cron is not enabled")), cronGuard ?? "no error");
+
+let cronValidation = null;
+try {
+  await db.query("select public.schedule_retention_cron('', '')");
+} catch (error) {
+  cronValidation = error.message;
+}
+check("schedule helper validates its arguments", Boolean(cronValidation && cronValidation.includes("p_url and p_secret are required")), cronValidation ?? "no error");
+
+section("grants");
+await db.query("set role authenticated");
+await asUser(userA);
+let retentionDenied = false;
+try {
+  await db.query("select * from public.retention_artifact_paths(10)");
+} catch (error) {
+  retentionDenied = /permission denied/i.test(error.message);
+}
+check("authenticated users cannot run the retention sweep", retentionDenied);
+
+let scheduleDenied = false;
+try {
+  await db.query("select public.schedule_retention_cron('https://x.example', 'secret')");
+} catch (error) {
+  scheduleDenied = /permission denied/i.test(error.message);
+}
+check("authenticated users cannot install the cron schedule", scheduleDenied);
+await db.query("reset role");
+
 section("RLS isolation");
 await db.query("set role authenticated");
 await asUser(userA);
@@ -221,6 +351,7 @@ check("other tenant cannot read the workspace", (await db.query("select count(*)
 check("other tenant cannot read the credit ledger", (await db.query("select count(*)::int as n from public.credit_ledger where organization_id = $1", [orgId])).rows[0].n === 0);
 check("other tenant cannot read the evidence", (await db.query("select count(*)::int as n from public.source_evidence where organization_id = $1", [orgId])).rows[0].n === 0);
 check("profiles stay private", (await db.query("select count(*)::int as n from public.profiles")).rows[0].n === 1);
+check("other tenant sees no change history", (await db.query("select count(*)::int as n from public.report_changes")).rows[0].n === 0);
 await db.query("reset role");
 
 console.log("");

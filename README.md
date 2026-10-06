@@ -78,10 +78,10 @@ The app keeps working without `.env.local`; it stays in demo mode.
    supabase db push
    ```
 
-3. Copy `.env.example` to `.env.local` and fill in the project URL, the anon key and (server-side only) the service role key.
+3. Copy `.env.example` to `.env.local` and fill in the project URL, the anon key, the service role key (server-only) and a `CRON_SECRET` (`openssl rand -hex 32`).
 4. Enable your chosen Supabase Auth providers.
-5. Create a private Storage bucket named `research-artifacts` for raw permitted HTML/PDF/screenshot artifacts.
-6. Add a scheduled job or Edge Function to delete expired artifacts and evidence based on `expires_at`.
+5. Migration `003` creates the private `research-artifacts` bucket for raw permitted HTML/PDF/screenshot artifacts.
+6. Schedule the retention sweep — see [Retention and the artifact bucket](#retention-and-the-artifact-bucket).
 
 ### Verify the migrations
 
@@ -89,7 +89,7 @@ The app keeps working without `.env.local`; it stays in demo mode.
 npm run db:verify
 ```
 
-Runs every file in `supabase/migrations` against an in-process Postgres (PGlite, WebAssembly) with a minimal Supabase shim, then asserts that onboarding is idempotent, that a research job reserves and settles credits atomically, that failed calls write nothing, and that one workspace cannot read another's reports, ledger or evidence. No credentials or network access needed.
+Runs every file in `supabase/migrations` against an in-process Postgres (PGlite, WebAssembly) with a minimal Supabase shim, then asserts that onboarding is idempotent, that a research job reserves and settles credits atomically, that change detection records one row per moved field, that a first snapshot records nothing, that the retention sweep never orphans an artifact, that rejected calls write nothing, and that one workspace cannot read another's reports, ledger, evidence or change history. No credentials or network access needed.
 
 ### Verify the connection
 
@@ -115,7 +115,40 @@ The dashboard runs in demo mode until a visitor signs in; after that it reads an
 
 `organization_id` is always derived from the signed-in user's membership inside the SQL functions, so a browser request can never choose its own workspace or price. Anonymous visitors keep the safe demo provider, and an unreachable project degrades to demo data with a visible notice instead of a broken page.
 
-Not wired to real data yet: the team member list, change history and credit activity still render sample content.
+### Team, change monitoring and retention
+
+| Flow | Where | What happens |
+| --- | --- | --- |
+| Team list | `/[locale]/team` → `workspace_members()` | Members, emails, roles and per-member research counts of the caller's workspace |
+| Invite a teammate | `POST /api/team/invite` | Owner/admin only. Sends the Supabase invitation and upserts the membership; roles are limited to admin/member/viewer |
+| Change history | `/[locale]/history` → `report_changes` | Every field that moved between two snapshots of the same company, grouped per research run |
+| Retention sweep | `POST /api/maintenance/retention` | Deletes expired Storage objects first, then evidence plus expired Starter snapshots. Rows whose object could not be deleted are deferred to the next run |
+
+Change detection runs inside `complete_research_job()`: when a company is researched again, the previous snapshot is compared field by field and a row per change is written (`added`, `removed` or `changed`, including confidence moves). Because `report_changes` stores the compared values as text and references snapshots with `ON DELETE SET NULL`, the history survives the retention sweep that removes the snapshots themselves.
+
+Not wired to real data yet: the credit activity list on the Billing page still renders sample content (the balance itself is real).
+
+### Retention and the artifact bucket
+
+The bucket is private and has no `storage.objects` policy, so the service role is the only writer and downloads must be authorised by a server route. The sweep has two parts:
+
+1. `POST /api/maintenance/retention` (requires `CRON_SECRET`) — calls `retention_artifact_paths()`, removes those objects from Storage, then calls `purge_expired_retention(removed_paths)`.
+2. A schedule that calls it. Either:
+
+   ```bash
+   npm run retention:run            # manual, uses BASE_URL + CRON_SECRET
+   ```
+
+   or, in the project, run `supabase/migrations/004_retention_cron.sql` and then:
+
+   ```sql
+   select public.schedule_retention_cron(
+     'https://your-app.example.com/api/maintenance/retention',
+     'the-same-CRON_SECRET'
+   );
+   ```
+
+   That installs a nightly `pg_cron` job (`0 3 * * *`) which posts through `pg_net`. Inspect it with `select * from cron.job_run_details order by start_time desc limit 10`.
 
 ## Production research pipeline
 
@@ -161,6 +194,12 @@ src/components/intelligence-dashboard.tsx     # Product UI and research flow
 src/app/[locale]/login/page.tsx               # Sign-in / sign-up route
 src/app/auth/callback/route.ts                # Email-link verification endpoint
 src/app/api/research/route.ts                 # Research endpoint (demo or Supabase-backed)
+src/app/api/team/invite/route.ts               # Workspace invitations (owner/admin)
+src/app/api/maintenance/retention/route.ts     # Expired artifact + evidence sweep
+src/components/team-page.tsx                   # Team list UI
+src/components/history-page.tsx                # Change-history timeline UI
+src/lib/data/activity-view.ts                  # Change + member row mapping
+scripts/run-retention.mjs                      # Manual sweep runner
 src/lib/data/workspace.ts                     # Server-side workspace loader
 src/lib/data/report-view.ts                   # Row -> view mapper
 src/lib/demo-data.ts                          # Demo report types and provider
@@ -170,4 +209,6 @@ src/lib/supabase/admin.ts                     # Service-role client (server jobs
 src/proxy.ts                                  # Session-cookie refresh
 supabase/migrations/001_company_intel_schema.sql
 supabase/migrations/002_workspace_and_research_rpc.sql
+supabase/migrations/003_change_monitoring_and_retention.sql
+supabase/migrations/004_retention_cron.sql
 ```
