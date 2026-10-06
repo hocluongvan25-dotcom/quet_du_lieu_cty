@@ -223,9 +223,17 @@ Chốt chặn kỹ thuật: `npm run check:content` quét `src/lib` và `src/com
 
 ---
 
-## 11. Connector: chỉ đọc trang công khai, và chỉ ghi lại thứ đã thấy
+## 11. Connector: chỉ đọc nguồn công khai, và chỉ ghi lại thứ đã thấy
 
 Connector biến một tên miền thành danh sách kênh liên hệ công khai. Nó chạy ở nơi có internet (máy người dùng hoặc server), không chạy trong sandbox.
+
+### Đọc gì (cập nhật 06/10/2026)
+
+Ngoài trang HTML, connector đọc thêm **tài liệu PDF cùng tên miền** — nơi chứa thứ trang web không có: báo cáo thường niên, press release, catalogue, tài liệu hướng dẫn nhà cung cấp. Đường dẫn cố định được mở rộng thành các nhóm: liên hệ; nhà cung cấp/mua hàng (`/suppliers`, `/vendor`, `/procurement`, `/become-a-supplier`…); báo chí (`/press`, `/newsroom`, `/media`); nhà đầu tư (`/investors`, `/annual-report`); chứng nhận/chất lượng; catalogue.
+
+PDF được chọn theo mức liên quan của tên file (nhà cung cấp > báo cáo tài chính > press release > catalogue > chứng nhận), tối đa 3 file mỗi lần chạy (`--max-documents`), chỉ cùng tên miền, tôn trọng robots.txt.
+
+Giới hạn đã biết và cách xử lý: **PDF scan ảnh không có lớp chữ, hoặc PDF dùng font bảng mã riêng** → ghi vào "không đọc được" kèm lý do và **không đoán giá trị**; PDF có mật khẩu bị bỏ qua; file quá lớn (mặc định 12 MB) bị bỏ qua.
 
 ### Cam kết, và chỗ được kiểm trong test
 
@@ -316,6 +324,7 @@ Kiểm chứng: `npm run export:test` — 43 check, gồm đọc lại CSV bằn
 | Tín hiệu | ví dụ "có bộ phận mua nguyên liệu riêng" — đọc từ nội dung trang |
 | Confidence, ngày chụp, ngày hết hạn | do hệ thống tính và ghi |
 | Bằng chứng | mỗi giá trị có URL trang đã thấy nó **và câu chữ đã thấy** |
+| Trong PDF công khai | cùng loại dữ liệu (email, điện thoại, tên + chức danh), đọc từ báo cáo thường niên / press release / tài liệu nhà cung cấp / catalogue cùng tên miền |
 
 **Về người** — từ hồ sơ LinkedIn công khai và từ các khối liên hệ công bố trên trang công ty:
 
@@ -340,9 +349,12 @@ Kiểm chứng: `npm run export:test` — 43 check, gồm đọc lại CSV bằn
 | Email suy luận theo pattern | chưa bật ở report; giai đoạn sau, phải có nhãn, hạn 30 ngày, không export trực tiếp |
 | Nội dung sau đăng nhập / login wall / CAPTCHA | không bao giờ vượt |
 | Dữ liệu thương mại trả phí (CBP manifest qua ImportYeti / Volza / Panjiva) | chưa cắm; đây là nguồn trade signal, không phải nguồn contact |
+| Sổ đăng ký nhà nước (UK Companies House, SEC EDGAR) | chưa cắm — miễn phí, là lớp tiếp theo nên làm |
+| Hội chợ / hiệp hội ngành | chưa cắm — không có API, phải đọc trang danh sách nhà triển lãm |
 | Checklist giấy tờ / điều khoản nhà cung cấp phải đáp ứng | chưa làm (đang nợ) |
 | Vai trò nhà sản xuất hay thương lái (`shipper_role`) | chưa làm (đang nợ) |
 | Năm thành lập, quy mô nhân sự, địa chỉ | **mới chỉ có trong dữ liệu demo**; connector chưa trích và view thật chưa map — cần làm |
+| Checklist giấy tờ trong PDF | PDF đã đọc được, nhưng phần rút ra **checklist nhà cung cấp phải đáp ứng** chưa làm (món đang nợ) |
 
 **Giới hạn kỹ thuật đang áp:** chỉ trang công khai · tôn trọng `robots.txt` · chỉ cùng domain · không đăng nhập, không tài khoản giả, không giải CAPTCHA · chặn SSRF trước khi kết nối · mọi giá trị phải xuất hiện nguyên văn trên trang.
 
@@ -366,7 +378,7 @@ Phần người dùng **không** tự làm được:
 | Lớp | Cho thêm | Chi phí | Trạng thái |
 | --- | --- | --- | --- |
 | **Trang công khai của chính công ty** | email, điện thoại, LinkedIn, form, tín hiệu | miễn phí | **đang chạy** |
-| **Nhiều nguồn công khai hơn**: press release, PDF/báo cáo thường niên, danh bạ hội chợ, hiệp hội ngành, tin tức | người (CEO, giám đốc mua hàng), ngày, mặt hàng, nhà máy | miễn phí (tốn công đọc) | chưa cắm |
+| **Nhiều nguồn công khai hơn**: press release, PDF/báo cáo thường niên, catalogue, tài liệu nhà cung cấp | người (kèm chức danh), email bộ phận, số điện thoại, ngày | miễn phí (tốn công đọc) | **đã cắm một phần (06/10/2026)**: đọc PDF cùng tên miền + mở rộng đường dẫn; danh bạ hội chợ / hiệp hội ngành còn thiếu |
 | **Sổ đăng ký nhà nước**: UK Companies House (API free, có officers/PSC, OGL cho phép dùng thương mại), SEC EDGAR (công ty đại chúng) | officers **chính thống**, không phải scrape | miễn phí | chưa cắm |
 | **Dữ liệu vận tải/hải quan**: US CBP manifest qua ImportYeti / Volza / Panjiva / ImportGenius | **ai đang mua mặt hàng này, từ ai, khối lượng, tần suất** — đây mới là tín hiệu người mua thật | ImportYeti có bản free giới hạn; Volza ~1.500 USD/năm; Panjiva/ImportGenius ~125–1.000+ USD/tháng | chưa cắm (cần API key/ngân sách) |
 | **Nhà cung cấp enrichment** (Apollo, ZoomInfo, Volza contact) | email, số điện thoại cá nhân | trả phí | chưa cắm — dữ liệu là của họ, mình **không kiểm chứng được nguồn gốc**, và nghĩa vụ dữ liệu cá nhân (PDP Law 91/2025, GDPR) vẫn thuộc về mình |

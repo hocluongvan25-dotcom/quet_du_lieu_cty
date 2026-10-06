@@ -8,6 +8,7 @@
  * Chạy: npm run connector:test
  */
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import zlib from "node:zlib";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -37,11 +38,46 @@ function section(title) {
 // Dựng mock fetch từ fixture: không có yêu cầu mạng nào ra ngoài.
 // ---------------------------------------------------------------------------
 async function main() {
+  // PDF công khai: một file không nén, một file nén Flate, một file ảnh scan (không có chữ).
+  const pdfContent = [
+    "BT /F1 11 Tf 72 720 Td (Supplier enquiries: procurement@mariani.com) Tj",
+    "0 -14 Td (Procurement Manager - Dana Whitfield) Tj",
+    "0 -14 Td (Supplier hotline: +1 707-452-2870) Tj",
+    "ET",
+  ].join("\n");
+
+  const pdfObject = (content, compressed) => {
+    const stream = compressed ? zlib.deflateSync(Buffer.from(content, "latin1")).toString("latin1") : content;
+    const filter = compressed ? " /Filter /FlateDecode" : "";
+    return [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj",
+      `3 0 obj << /Length ${stream.length}${filter} >>`,
+      "stream",
+      stream,
+      "endstream",
+      "endobj",
+      "trailer << /Root 1 0 R >>",
+      "%%EOF",
+    ].join("\n");
+  };
+
+  const pdfPlain = pdfObject(pdfContent, false);
+  const pdfCompressed = pdfObject(pdfContent, true);
+  // PDF scan: luồng nén chỉ có dữ liệu ảnh, không có toán tử chữ nào.
+  const pdfScanned = pdfObject(zlib.deflateSync(Buffer.alloc(4096, 7)).toString("latin1"), false);
+  const pdfNotPdf = "%PDF-" + "junk".repeat(10);
+
   const files = {
     "contact-us.html": await readFile(path.join(fixtures, "contact-us.html"), "utf8"),
     "bulk-and-ingredients.html": await readFile(path.join(fixtures, "bulk-and-ingredients.html"), "utf8"),
     "home.html": await readFile(path.join(fixtures, "home.html"), "utf8"),
     "robots.txt": await readFile(path.join(fixtures, "robots.txt"), "utf8"),
+    "supplier-guide.pdf": pdfPlain,
+    "annual-report-2025.pdf": pdfCompressed,
+    "quality-certification.pdf": pdfScanned,
+    "not-really.pdf": pdfNotPdf,
   };
 
   const entry = `
@@ -51,8 +87,10 @@ import { normalizeSeed, collectCandidateLinks } from "@/lib/connector/discover";
 import { parseRobots, isPathAllowed } from "@/lib/connector/robots";
 import { htmlToLines, registrableDomain } from "@/lib/connector/html";
 import { assertPublicUrl, isBlockedAddress, UnsafeUrlError } from "@/lib/connector/safety";
+import { pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString } from "@/lib/connector/pdf";
+import { extractFromLines } from "@/lib/connector/extract";
 
-export const api = { runConnector, extractFromPage, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError };
+export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString };
 `;
   await mkdir(workDir, { recursive: true });
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
@@ -98,11 +136,15 @@ async function runChecks(api, files) {
   // ------------------------------------------------------------------ links ---
   section("chọn trang để đọc");
   const links = api.collectCandidateLinks(files["home.html"], "https://mariani.com/", "mariani.com");
-  const linkUrls = links.map((item) => item.url);
-  check("ưu tiên trang liên hệ", linkUrls[0].includes("contact-us"), linkUrls[0]);
-  check("lấy trang nguyên liệu", linkUrls.some((url) => url.includes("bulk-and-ingredients")));
-  check("bỏ link ra ngoài tên miền", !linkUrls.some((url) => url.includes("facebook.com")));
-  check("bỏ trang giỏ hàng", !linkUrls.some((url) => url.includes("/cart")));
+  const pageUrls = links.filter((item) => item.kind === "page").map((item) => item.url);
+  const documentUrls = links.filter((item) => item.kind === "document").map((item) => item.url);
+  check("ưu tiên trang liên hệ", pageUrls[0].includes("contact-us"), pageUrls[0]);
+  check("lấy trang nguyên liệu", pageUrls.some((url) => url.includes("bulk-and-ingredients")));
+  check("bỏ link ra ngoài tên miền", !pageUrls.some((url) => url.includes("facebook.com")));
+  check("bỏ trang giỏ hàng", !pageUrls.some((url) => url.includes("/cart")));
+  check("nhận ra tài liệu PDF cùng tên miền", documentUrls.length === 3, documentUrls.join(", "));
+  check("tài liệu nhà cung cấp được ưu tiên nhất", documentUrls[0].includes("supplier-guide.pdf"), documentUrls[0]);
+  check("không nhận PDF của tên miền khác", !documentUrls.some((url) => url.includes("other-site.com")));
 
   // -------------------------------------------------------------- extraction --
   section("tách dữ liệu từ trang Contact Us");
@@ -153,6 +195,44 @@ async function runChecks(api, files) {
   check("lấy email bộ phận nguyên liệu", bulkValues.includes("ingredients@mariani.com"));
   check("gắn nhãn 'bộ phận' cho ingredients@", bulk.channels.find((c) => c.value === "ingredients@mariani.com")?.identityMatch === "department");
 
+
+  // ------------------------------------------------------------------- pdf ---
+  section("đọc PDF công khai");
+  check("nhận ra file PDF theo magic number", api.looksLikePdf(files["supplier-guide.pdf"]) === true && api.looksLikePdf("not a pdf") === false);
+
+  const plainPdf = await api.pdfToLines(files["supplier-guide.pdf"]);
+  check("đọc được PDF không nén", plainPdf.ok === true, plainPdf.reason ?? "");
+  check("lấy nguyên câu chữ trong PDF", plainPdf.lines.some((line) => line.includes("Supplier enquiries: procurement@mariani.com")), plainPdf.lines.join(" / "));
+  check("ngắt dòng theo toán tử Td", plainPdf.lines.some((line) => line.includes("Procurement Manager - Dana Whitfield")));
+
+  const compressedPdf = await api.pdfToLines(files["annual-report-2025.pdf"]);
+  check("đọc được PDF nén FlateDecode", compressedPdf.ok === true && compressedPdf.compressedStreams >= 1, compressedPdf.reason ?? "");
+  check("hai kiểu nén cho ra cùng nội dung", JSON.stringify(compressedPdf.lines) === JSON.stringify(plainPdf.lines));
+
+  const scanned = await api.pdfToLines(files["quality-certification.pdf"]);
+  check("PDF scan ảnh thì báo không đọc được, không đoán", scanned.ok === false && scanned.lines.length === 0, scanned.reason ?? "");
+  const junk = await api.pdfToLines(files["not-really.pdf"]);
+  check("file không có luồng nội dung cũng báo không đọc được", junk.ok === false, junk.reason ?? "");
+  check("chuỗi hex UTF-16BE đọc đúng", api.decodePdfHexString("FEFF00480069") === "Hi");
+  check("bỏ escape của chuỗi PDF", api.unescapePdfString("a\\(b\\)c") === "a(b)c");
+
+  const fromPdf = api.extractFromLines({ url: "https://mariani.com/documents/supplier-guide.pdf", lines: plainPdf.lines, kind: "pdf" });
+  const pdfValues = fromPdf.channels.map((channel) => channel.value);
+  check("lấy email trong PDF", pdfValues.includes("procurement@mariani.com"), pdfValues.join(", "));
+  check("email trong PDF có tên người đi kèm thì thuộc về người đó", fromPdf.channels.find((c) => c.value === "procurement@mariani.com")?.identityMatch === "person");
+  check("lấy số điện thoại trong PDF", pdfValues.includes("+17074522870"), pdfValues.join(", "));
+  check("tên người công bố cạnh email được gắn vào kênh", fromPdf.channels.find((c) => c.value === "procurement@mariani.com")?.personName === "Dana Whitfield");
+  check("PDF không sinh ra kênh biểu mẫu hay mạng xã hội", !fromPdf.channels.some((channel) => channel.type === "form" || channel.type === "linkedin"));
+  const pdfRaw = files["supplier-guide.pdf"];
+  const pdfCompact = pdfRaw.replace(/[.\-()\s]/g, "");
+  check(
+    "mọi giá trị trong PDF đều có nguyên văn trong chính file đó",
+    [...pdfValues, fromPdf.channels.find((c) => c.value === "procurement@mariani.com")?.personName ?? ""]
+      .filter(Boolean)
+      .every((value) => pdfRaw.includes(value) || pdfCompact.includes(value.replace(/[.\-()\s]/g, ""))),
+    [...pdfValues].join(", "),
+  );
+
   // --------------------------------------------------------------- end to end -
   section("chạy toàn bộ connector trên fixture");
   const requested = [];
@@ -164,11 +244,16 @@ async function runChecks(api, files) {
       url: finalUrl ?? String(url),
       headers: new Map([["content-type", contentType]]) && { get: () => contentType },
       text: async () => body,
+      // PDF phải giữ nguyên từng byte: mock trả về đúng những byte đã tạo file.
+      arrayBuffer: async () => Uint8Array.from(body, (char) => char.charCodeAt(0) & 0xff).buffer,
     });
     const href = String(url);
     if (href.endsWith("/robots.txt")) return make(files["robots.txt"], "text/plain");
     if (href.includes("bulk-and-ingredients")) return make(files["bulk-and-ingredients.html"]);
     if (href.includes("contact")) return make(files["contact-us.html"]);
+    if (href.endsWith("supplier-guide.pdf")) return make(files["supplier-guide.pdf"], "application/pdf");
+    if (href.endsWith("annual-report-2025.pdf")) return make(files["annual-report-2025.pdf"], "application/pdf");
+    if (href.endsWith("quality-certification.pdf")) return make(files["quality-certification.pdf"], "application/pdf");
     if (href.includes("/cart")) return make("cart page", "text/html", 200);
     if (href.includes("/account")) return make("login", "text/html", 200, "https://mariani.com/account/login");
     if (href === "https://mariani.com/" || href === "https://mariani.com") return make(files["home.html"]);
@@ -176,7 +261,7 @@ async function runChecks(api, files) {
   };
 
   const noGuard = async () => {};
-  const result = await api.runConnector("mariani.com", { fetchImpl: mockFetch, maxPages: 5, delayMs: 0, guard: noGuard, log: () => {} });
+  const result = await api.runConnector("mariani.com", { fetchImpl: mockFetch, maxPages: 5, maxDocuments: 2, delayMs: 0, guard: noGuard, log: () => {} });
 
   check("đọc robots.txt", requested.some((url) => url.endsWith("/robots.txt")));
   check("chỉ gọi trong tên miền của công ty", requested.every((url) => {
@@ -190,14 +275,15 @@ async function runChecks(api, files) {
   const phoneChannels = result.channels.filter((channel) => channel.type === "phone");
   check(
     "gộp kênh: số điện thoại xuất hiện ở 2 trang chỉ còn 1 dòng, fax tách riêng",
-    phoneChannels.length === 2 && phoneChannels.some((c) => c.value === "7074522800") && phoneChannels.some((c) => c.value === "7074522973" && c.label === "Fax công bố"),
+    phoneChannels.length === 3 && phoneChannels.some((c) => c.value === "7074522800") && phoneChannels.some((c) => c.value === "7074522973" && c.label === "Fax công bố") && phoneChannels.some((c) => c.value === "+17074522870"),
     JSON.stringify(phoneChannels.map((c) => `${c.value}:${c.label}`)),
   );
   check("số của web store vẫn không lọt vào danh sách", !result.channels.some((channel) => channel.value === "9895141459"));
   check("có đủ 4 email công bố", ["productinfo@mariani.com", "ssousa@mariani.com", "tgarcia@mariani.com", "ingredients@mariani.com"].every((value) => result.channels.some((channel) => channel.value === value)), result.channels.map((c) => c.value).join(", "));
-  check("gộp người theo tên", result.people.length === 2, result.people.map((person) => person.name).join(", "));
+  check("gộp người theo tên", result.people.length === 3, result.people.map((person) => person.name).join(", "));
+  check("người trong PDF cũng vào danh sách", result.people.some((person) => person.name === "Dana Whitfield"));
   check("không có kênh nào không phải confirmed", result.channels.every((channel) => channel.certainty === "confirmed"));
-  const pageText = `${files["contact-us.html"]} ${files["bulk-and-ingredients.html"]}`.replace(/[.\-()\s]/g, "");
+  const pageText = `${files["contact-us.html"]} ${files["bulk-and-ingredients.html"]} ${files["supplier-guide.pdf"]} ${files["annual-report-2025.pdf"]}`.replace(/[.\-()\s]/g, "");
   check(
     "mọi email và số điện thoại đều có nguyên văn trên trang",
     result.channels
@@ -206,6 +292,13 @@ async function runChecks(api, files) {
     result.channels.filter((c) => c.type === "email" || c.type === "phone").map((c) => c.value).join(", "),
   );
   check("ghi lại trang đã đọc kèm trạng thái", result.pages.some((page) => page.url.includes("contact-us") && page.status === 200));
+  check("đọc tài liệu PDF cùng tên miền", requested.some((url) => url.endsWith("supplier-guide.pdf")) && requested.some((url) => url.endsWith("annual-report-2025.pdf")));
+  check("lấy được nội dung từ PDF", result.channels.some((channel) => channel.value === "procurement@mariani.com"));
+  check("tài liệu PDF được ghi vào danh sách trang đã đọc, có kind", result.pages.some((page) => page.kind === "pdf" && page.url.endsWith("supplier-guide.pdf")));
+  check("không gọi PDF của tên miền khác", !requested.some((url) => url.includes("other-site.com")));
+  check("không gọi PDF bị robots.txt chặn", !requested.some((url) => url.includes("quality-certification")));
+  check("không đọc quá số tài liệu cho phép", requested.filter((url) => url.endsWith(".pdf")).length === 2, requested.filter((url) => url.endsWith(".pdf")).join(", "));
+  check("PDF scan không sinh ra kênh nào và không bị đoán", !result.channels.some((channel) => channel.value.includes("quality-certification")));
   check("không vượt tường đăng nhập", !result.channels.some((channel) => String(channel.value).includes("login")));
   check("trang bị robots chặn không được tải", !requested.some((url) => url.endsWith("/cart")));
 

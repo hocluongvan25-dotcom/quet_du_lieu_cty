@@ -8,6 +8,8 @@
 
 import { assertPublicUrl, UnsafeUrlError } from "./safety";
 
+export type FetchKind = "html" | "pdf";
+
 export type FetchOutcome = {
   url: string;
   finalUrl: string;
@@ -16,12 +18,16 @@ export type FetchOutcome = {
   blocked: boolean;
   loginWall: boolean;
   contentType: string;
+  /** PDF được giữ nguyên từng byte (chuỗi latin1), không giải mã UTF-8. */
+  kind: FetchKind;
   body: string;
   reason?: string;
 };
 
 const DEFAULT_TIMEOUT_MS = 12_000;
 const DEFAULT_MAX_BYTES = 3_000_000;
+/** PDF thường nặng hơn trang HTML: báo cáo thường niên vài MB là bình thường. */
+const DEFAULT_MAX_PDF_BYTES = 12_000_000;
 export const DEFAULT_USER_AGENT = "SeekoraBot/0.1 (+public contact discovery; respects robots.txt)";
 
 const LOGIN_PATH = /\/(login|signin|sign-in|auth|account|dang-nhap)(\/|$|\?)/i;
@@ -37,7 +43,7 @@ export function looksLikeLoginWall(url: string): boolean {
 
 export async function fetchPage(
   url: string,
-  options: { fetchImpl?: typeof fetch; timeoutMs?: number; maxBytes?: number; userAgent?: string; guard?: (url: string) => Promise<unknown> } = {},
+  options: { fetchImpl?: typeof fetch; timeoutMs?: number; maxBytes?: number; maxPdfBytes?: number; userAgent?: string; guard?: (url: string) => Promise<unknown> } = {},
 ): Promise<FetchOutcome> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -53,6 +59,7 @@ export async function fetchPage(
     blocked: false,
     loginWall: false,
     contentType: "",
+    kind: "html",
     body: "",
   };
 
@@ -66,7 +73,7 @@ export async function fetchPage(
       signal: controller.signal,
       headers: {
         "user-agent": options.userAgent ?? DEFAULT_USER_AGENT,
-        accept: "text/html,application/xhtml+xml",
+        accept: "text/html,application/xhtml+xml,application/pdf",
       },
     });
 
@@ -82,8 +89,22 @@ export async function fetchPage(
       return { ...base, finalUrl, status, contentType, reason: `máy chủ trả ${status}` };
     }
 
-    if (!/html|xml|text/i.test(contentType)) {
-      return { ...base, finalUrl, status, contentType, reason: `không phải HTML (${contentType || "không rõ content-type"})` };
+    const isPdf = /application\/pdf|application\/x-pdf/i.test(contentType);
+    if (!isPdf && !/html|xml|text/i.test(contentType)) {
+      return { ...base, finalUrl, status, contentType, reason: `không phải HTML hay PDF (${contentType || "không rõ content-type"})` };
+    }
+
+    if (isPdf) {
+      const buffer = new Uint8Array(await response.arrayBuffer());
+      if (buffer.byteLength > (options.maxPdfBytes ?? DEFAULT_MAX_PDF_BYTES)) {
+        return { ...base, finalUrl, status, contentType, kind: "pdf", reason: "file PDF quá lớn" };
+      }
+      // Giữ nguyên từng byte: giải mã UTF-8 sẽ làm hỏng luồng nén của PDF.
+      let body = "";
+      for (let index = 0; index < buffer.length; index += 8192) {
+        body += String.fromCharCode(...Array.from(buffer.subarray(index, index + 8192)));
+      }
+      return { url, finalUrl, status, ok: true, blocked: false, loginWall: false, contentType, kind: "pdf", body };
     }
 
     const body = await response.text();
@@ -95,7 +116,7 @@ export async function fetchPage(
       return { ...base, finalUrl, status, loginWall: true, contentType, reason: "chuyển hướng tới trang đăng nhập" };
     }
 
-    return { url, finalUrl, status, ok: true, blocked: false, loginWall: false, contentType, body };
+    return { url, finalUrl, status, ok: true, blocked: false, loginWall: false, contentType, kind: "html", body };
   } catch (error) {
     if (error instanceof UnsafeUrlError) {
       return { ...base, status: 0, blocked: true, reason: `bị chặn vì an toàn: ${error.message}` };

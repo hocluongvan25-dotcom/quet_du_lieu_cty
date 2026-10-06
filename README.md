@@ -202,6 +202,14 @@ Not found today: personal mobile numbers (LinkedIn has no phone field; under ~5%
 
 Reading one company website is not a product — anyone can do that in five minutes. The value is in reading **many** sources, merging them into one correct entity, pointing at the right door and keeping it fresh, plus the layer Google does not have: customs/registry data. `docs/buyer-discovery-spec.md` §14 lays out the source layers (company pages → press/PDF/trade-fair directories → government registries → trade data → enrichment vendors → mailbox verification → monitoring) with cost and legal status for each, and splits the AI's job into what it does today (understanding one page: which email belongs to the company, which number is a fax, which name goes with which address) versus what it must do next (choosing which sources to read, entity resolution across sources, reading long documents into a supplier-requirements checklist, resolving conflicts, and matching a Vietnamese supplier's product/HS code to what a buyer actually imports).
 
+### Connector: public sources to sourced channels
+
+Beyond HTML pages, the connector reads **same-domain PDFs** — annual reports, press releases, catalogues and supplier guides — because that is where the things a website does not publish live: named people with titles, department mailboxes, switchboard numbers. PDFs are ranked by filename relevance (supplier > financial report > press release > catalogue > certification), capped at three per run (`--max-documents`), same-domain only, robots.txt respected. A scanned PDF with no text layer, a font-encoded PDF, an encrypted file or one over 12 MB is recorded as "could not read" **with a reason** and contributes nothing — the connector never guesses a value out of a document it failed to read.
+
+```bash
+npm run connector:run mariani.com -- --max-pages 8 --max-documents 4
+```
+
 ### Connector: public pages to sourced channels
 
 `src/lib/connector/` turns a domain into contact channels found on public pages. Rules are enforced in code and covered by tests: public pages only (no login, no cookies, no CAPTCHA solving), robots.txt respected, same-domain only, every value carries the page URL and the exact sentence it was found in, and no email is ever generated from a pattern.
@@ -218,7 +226,7 @@ Reading one company website is not a product — anyone can do that in five minu
 | `to-report.ts` | Maps results onto the frozen report shape |
 
 ```bash
-npm run connector:test    # 71 checks on real HTML fixtures, no network needed
+npm run connector:test    # 98 checks on real HTML and PDF fixtures, no network needed
 npm run connector:run mariani.com            # real run, human readable
 npm run connector:run mariani.com -- --json  # full JSON
 ```

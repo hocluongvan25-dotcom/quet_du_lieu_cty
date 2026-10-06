@@ -6,7 +6,7 @@
  * trả về đều kèm đúng câu chữ đã thấy nó (`evidenceSnippet`) và URL của trang.
  */
 
-import { decodeEntities, htmlToLines, htmlToText, registrableDomain } from "./html";
+import { decodeEntities, htmlToLines, registrableDomain } from "./html";
 import type { Certainty, ChannelPolicy, ConnectorNote, FoundChannel, FoundPerson, IdentityMatch, PageExtraction, TargetFamily } from "./types";
 
 const EMAIL_RE = /[A-Za-z0-9._%+'\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
@@ -112,7 +112,24 @@ export type ExtractInput = {
   targets?: TargetFamily[];
 };
 
-export function extractFromPage({ url, html, targets = ["email", "phone", "whatsapp", "linkedin", "form"] }: ExtractInput): PageExtraction {
+export type ExtractLinesInput = {
+  url: string;
+  lines: string[];
+  /** Nguồn của các dòng: trang HTML hay file PDF công khai. */
+  kind?: "html" | "pdf";
+  /** Chỉ dùng cho HTML: mailto:, link mạng xã hội, `<form>`, widget chat. */
+  html?: string;
+  targets?: TargetFamily[];
+};
+
+/**
+ * Tách dữ liệu từ những dòng chữ đã có sẵn — dùng chung cho HTML và PDF.
+ * Phần chỉ có ở HTML (mailto:, link mạng xã hội, `<form>`, widget chat) tự bỏ qua
+ * khi nguồn là PDF.
+ */
+export function extractFromLines({ url, lines, kind = "html", html: rawHtml = "", targets = ["email", "phone", "whatsapp", "linkedin", "form"] }: ExtractLinesInput): PageExtraction {
+  const html = kind === "html" ? rawHtml : "";
+  const text = lines.join(" | ");
   const host = (() => {
     try {
       return new URL(url).hostname;
@@ -121,8 +138,6 @@ export function extractFromPage({ url, html, targets = ["email", "phone", "whats
     }
   })();
   const siteDomain = registrableDomain(host);
-  const lines = htmlToLines(html);
-  const text = htmlToText(html);
 
   const channels: FoundChannel[] = [];
   const notes: ConnectorNote[] = [];
@@ -142,8 +157,8 @@ export function extractFromPage({ url, html, targets = ["email", "phone", "whats
     const found = line.match(EMAIL_RE) ?? [];
     found.forEach((value) => emailMatches.push({ value, index: lineIndex, line }));
   });
-  // mailto: trong href, kể cả khi chữ trên trang bị cắt.
-  const mailtoMatches = html.match(/mailto:([^"'>?\s]+)/gi) ?? [];
+  // mailto: trong href, kể cả khi chữ trên trang bị cắt. PDF không có href.
+  const mailtoMatches = kind === "html" ? html.match(/mailto:([^"'>?\s]+)/gi) ?? [] : [];
   mailtoMatches.forEach((raw) => {
     const value = decodeEntities(raw.replace(/^mailto:/i, "").trim());
     if (!value) return;
@@ -257,7 +272,7 @@ export function extractFromPage({ url, html, targets = ["email", "phone", "whats
   });
 
   // ------------------------------------------------------- social / links ---
-  const linkMatches = html.match(/https?:\/\/[^\s"'<>)]+/gi) ?? [];
+  const linkMatches = kind === "html" ? html.match(/https?:\/\/[^\s"'<>)]+/gi) ?? [] : [];
   const hrefs = linkMatches.map((raw) => decodeEntities(raw.replace(/[.,)]+$/, "")));
 
   hrefs.forEach((href) => {
@@ -300,7 +315,7 @@ export function extractFromPage({ url, html, targets = ["email", "phone", "whats
   });
 
   // Biểu mẫu liên hệ / đăng ký nhà cung cấp: dấu hiệu bằng chữ trên trang.
-  const formMatch = /<form\b[^>]*>/gi.test(html) && /contact|enquir|inquir|supplier|vendor|register|liên hệ/i.test(text);
+  const formMatch = kind === "html" && /<form\b[^>]*>/gi.test(html) && /contact|enquir|inquir|supplier|vendor|register|liên hệ/i.test(text);
   if (formMatch && targets.includes("form")) {
     const line = lines.find((item) => /contact|enquir|inquir|supplier|vendor|register|liên hệ/i.test(item)) ?? "";
     push({
@@ -326,7 +341,7 @@ export function extractFromPage({ url, html, targets = ["email", "phone", "whats
   });
 
   // ------------------------------------------------- ghi chú chưa thấy ------
-  if (targets.includes("whatsapp") && !channels.some((channel) => channel.type === "whatsapp")) {
+  if (kind === "html" && targets.includes("whatsapp") && !channels.some((channel) => channel.type === "whatsapp")) {
     const widget = CHAT_WIDGETS.find((item) => item.pattern.test(html));
     notes.push({
       kind: "not_found",
@@ -338,7 +353,7 @@ export function extractFromPage({ url, html, targets = ["email", "phone", "whats
     });
   }
 
-  if (targets.includes("linkedin") && !channels.some((channel) => channel.type === "linkedin" && channel.identityMatch === "company_general")) {
+  if (kind === "html" && targets.includes("linkedin") && !channels.some((channel) => channel.type === "linkedin" && channel.identityMatch === "company_general")) {
     notes.push({
       kind: "not_found",
       label: "LinkedIn công ty",
@@ -348,6 +363,10 @@ export function extractFromPage({ url, html, targets = ["email", "phone", "whats
   }
 
   return { channels, people, notes };
+}
+
+export function extractFromPage({ url, html, targets = ["email", "phone", "whatsapp", "linkedin", "form"] }: ExtractInput): PageExtraction {
+  return extractFromLines({ url, lines: htmlToLines(html), kind: "html", html, targets });
 }
 
 export function isLoginWall(url: string): boolean {

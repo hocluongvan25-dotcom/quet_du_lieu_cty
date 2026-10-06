@@ -10,11 +10,15 @@
  *  - tôn trọng robots.txt;
  *  - chỉ lấy giá trị có trên trang, không sinh email theo pattern;
  *  - mọi giá trị đều kèm câu chữ đã thấy nó và URL của trang;
- *  - thứ của bên thứ ba (tên miền khác) vào mục "đã loại trừ", không vào kênh.
+ *  - thứ của bên thứ ba (tên miền khác) vào mục "đã loại trừ", không vào kênh;
+ *  - đọc cả PDF cùng tên miền (báo cáo thường niên, press release, tài liệu nhà
+ *    cung cấp) — nơi chứa những thứ trang HTML không có; PDF scan ảnh thì ghi
+ *    "không đọc được", không đoán.
  */
 
-import { extractFromPage } from "./extract";
+import { extractFromLines, extractFromPage } from "./extract";
 import { fetchPage } from "./fetch";
+import { pdfToLines } from "./pdf";
 import { planDiscovery, normalizeSeed, hostOf, type DiscoveryOptions } from "./discover";
 import { registrableDomain } from "./html";
 import type { ConnectorNote, ConnectorResult, FoundChannel, FoundPerson, PageReport, TargetFamily } from "./types";
@@ -103,7 +107,62 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
     });
 
     notes.push(...extracted.notes);
-    pages.push({ url: outcome.finalUrl, status: outcome.status, channels: extracted.channels.length });
+    pages.push({ url: outcome.finalUrl, status: outcome.status, channels: extracted.channels.length, kind: "html" });
+
+    if (delayMs > 0) await sleep(delayMs);
+  }
+
+  // ------------------------------------------------------------- tài liệu ---
+  const documentUrls = [...new Set(plan.documents)].filter((url) => !urls.includes(url));
+  if (documentUrls.length > 0) log(`đọc ${documentUrls.length} tài liệu PDF trên ${domain}`);
+
+  for (const url of documentUrls) {
+    pagesFetched += 1;
+    const outcome = await fetchPage(url, { fetchImpl: options.fetchImpl, userAgent: options.userAgent, guard: options.guard });
+
+    if (!outcome.ok) {
+      pages.push({ url: outcome.finalUrl, status: outcome.blocked ? "blocked" : "error", reason: outcome.reason ?? "không tải được", channels: 0, kind: "pdf" });
+      if (delayMs > 0) await sleep(delayMs);
+      continue;
+    }
+
+    const pdf = await pdfToLines(outcome.body);
+    if (!pdf.ok) {
+      // Không đọc được thì ghi lại lý do — tuyệt đối không đoán giá trị.
+      pages.push({ url: outcome.finalUrl, status: outcome.status, reason: pdf.reason ?? "không đọc được PDF", channels: 0, kind: "pdf" });
+      notes.push({
+        kind: "skipped",
+        label: url,
+        detail: `Tài liệu PDF không đọc được: ${pdf.reason ?? "không rõ lý do"}. Không suy diễn giá trị từ file này.`,
+        sourceUrl: url,
+      });
+      if (delayMs > 0) await sleep(delayMs);
+      continue;
+    }
+
+    const extracted = extractFromLines({ url: outcome.finalUrl, lines: pdf.lines, kind: "pdf", targets });
+
+    extracted.channels.forEach((channel) => {
+      const key = `${channel.type}:${channel.value.toLowerCase()}`;
+      if (seenChannels.has(key)) return;
+      seenChannels.add(key);
+      channels.push(channel);
+    });
+
+    extracted.people.forEach((person) => {
+      const existing = people.get(person.name.toLowerCase());
+      if (existing) {
+        person.channelValues.forEach((value) => {
+          if (!existing.channelValues.includes(value)) existing.channelValues.push(value);
+        });
+        if (!existing.title && person.title) existing.title = person.title;
+        return;
+      }
+      people.set(person.name.toLowerCase(), person);
+    });
+
+    notes.push(...extracted.notes);
+    pages.push({ url: outcome.finalUrl, status: outcome.status, channels: extracted.channels.length, kind: "pdf" });
 
     if (delayMs > 0) await sleep(delayMs);
   }

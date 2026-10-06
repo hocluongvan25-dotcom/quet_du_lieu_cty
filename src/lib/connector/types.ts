@@ -44,6 +44,8 @@ export type PageReport = {
   status: number | "blocked" | "error" | "skipped";
   reason?: string;
   channels: number;
+  /** Trang HTML hay file PDF công khai (báo cáo, press release, catalogue…). */
+  kind?: "html" | "pdf";
 };
 
 export type ConnectorResult = {

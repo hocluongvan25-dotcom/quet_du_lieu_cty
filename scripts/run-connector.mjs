@@ -6,8 +6,11 @@
  *   npm run connector:run https://mariani.com/pages/contact-us -- --json
  *   npm run connector:run mariani.com -- --max-pages 8 --targets email,phone,linkedin
  *
- * Connector chỉ đọc trang công khai trong cùng tên miền, tôn trọng robots.txt,
- * không đăng nhập, không giải CAPTCHA, và không sinh email theo pattern.
+ * Connector chỉ đọc trang công khai trong cùng tên miền (kể cả PDF: báo cáo,
+ * press release, tài liệu nhà cung cấp), tôn trọng robots.txt, không đăng nhập,
+ * không giải CAPTCHA, và không sinh email theo pattern.
+ *
+ *   npm run connector:run mariani.com -- --max-documents 4
  */
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
@@ -18,12 +21,13 @@ const root = process.cwd();
 const workDir = path.join(root, ".connector-test");
 
 function parseArgs(argv) {
-  const args = { seed: "", json: false, maxPages: 6, delayMs: 400, targets: undefined };
+  const args = { seed: "", json: false, maxPages: 6, maxDocuments: 3, delayMs: 400, targets: undefined };
   const rest = [];
   for (let i = 0; i < argv.length; i += 1) {
     const value = argv[i];
     if (value === "--json") args.json = true;
     else if (value === "--max-pages") args.maxPages = Number(argv[++i]) || 6;
+    else if (value === "--max-documents") args.maxDocuments = Number(argv[++i]) || 3;
     else if (value === "--delay") args.delayMs = Number(argv[++i]) || 0;
     else if (value === "--targets") args.targets = String(argv[++i] ?? "").split(",").map((item) => item.trim()).filter(Boolean);
     else if (value === "--") continue;
@@ -70,6 +74,7 @@ export const runConnectorFn = runConnector;
 
   const result = await runConnectorFn(args.seed, {
     maxPages: args.maxPages,
+    maxDocuments: args.maxDocuments,
     delayMs: args.delayMs,
     targets: args.targets,
     log: args.json ? () => {} : (message) => console.error(`· ${message}`),
@@ -82,7 +87,8 @@ export const runConnectorFn = runConnector;
     return;
   }
 
-  console.log(`\nCÔNG TY: ${result.domain}   (${result.pagesFetched} trang đã đọc)`);
+  const documents = result.pages.filter((page) => page.kind === "pdf").length;
+  console.log(`\nCÔNG TY: ${result.domain}   (${result.pagesFetched} nguồn đã đọc${documents > 0 ? `, trong đó ${documents} PDF` : ""})`);
   console.log("\nKÊNH TÌM ĐƯỢC:");
   if (result.channels.length === 0) console.log("  (không có)");
   result.channels.forEach((channel) => {
@@ -109,9 +115,10 @@ export const runConnectorFn = runConnector;
     });
   }
 
-  console.log("\nTRANG ĐÃ ĐỌC:");
+  console.log("\nNGUỒN ĐÃ ĐỌC:");
   result.pages.forEach((page) => {
-    console.log(`  ${page.status === "skipped" ? "bỏ qua" : page.status} · ${page.url}${page.reason ? ` (${page.reason})` : ""}`);
+    const kind = page.kind === "pdf" ? "PDF" : "trang";
+    console.log(`  ${page.status === "skipped" ? "bỏ qua" : page.status} · ${kind} · ${page.url}${page.reason ? ` (${page.reason})` : ""}`);
   });
   console.log("");
 }
