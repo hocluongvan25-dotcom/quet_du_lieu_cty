@@ -179,6 +179,29 @@ An inferred email can be stored and shown in the app, but it only becomes export
 
 Writes come from connectors running with the service role; members only read (`insert`/`update`/`delete` are revoked from `authenticated`, and `db:verify` asserts that).
 
+### Connector: public pages to sourced channels
+
+`src/lib/connector/` turns a domain into contact channels found on public pages. Rules are enforced in code and covered by tests: public pages only (no login, no cookies, no CAPTCHA solving), robots.txt respected, same-domain only, every value carries the page URL and the exact sentence it was found in, and no email is ever generated from a pattern.
+
+| Piece | Role |
+| --- | --- |
+| `html.ts` | HTML to lines, entity decoding, registrable-domain helper |
+| `extract.ts` | Emails, phones, social/WhatsApp links, forms, adjacent person names, excluded third-party values |
+| `robots.ts` | robots.txt parsing and longest-match Allow/Disallow |
+| `fetch.ts` | One page fetch with timeout, size cap, login-wall and block detection |
+| `safety.ts` | SSRF guard: loopback, private ranges, link-local/metadata IPs, `.internal`, non-http schemes |
+| `discover.ts` | Page selection: contact/supplier/about pages, same domain, robots-respecting |
+| `index.ts` | `runConnector(domain)` orchestration |
+| `to-report.ts` | Maps results onto the frozen report shape |
+
+```bash
+npm run connector:test    # 71 checks on real HTML fixtures, no network needed
+npm run connector:run mariani.com            # real run, human readable
+npm run connector:run mariani.com -- --json  # full JSON
+```
+
+`POST /api/connector` with `{ "domain": "mariani.com" }` does the same over HTTP. Results are returned, **not persisted** — that needs migrations 002–006 applied first.
+
 ### Retention and the artifact bucket
 
 The bucket is private and has no `storage.objects` policy, so the service role is the only writer and downloads must be authorised by a server route. The sweep has two parts:

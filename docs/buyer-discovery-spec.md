@@ -217,3 +217,49 @@ Lý do không chỉ là "đúng phạm vi sản phẩm", mà là **niềm tin**:
 Thiếu dữ liệu thì người dùng tự đi tìm — không mất gì. Lời khuyên sai thì mất niềm tin, và mất luôn những dữ liệu đúng đi kèm.
 
 Chốt chặn kỹ thuật: `npm run check:content` quét `src/lib` và `src/components`, báo lỗi nếu xuất hiện trường mang tính khuyên bảo (xếp hạng, "vì sao nên gặp", mức ưu tiên, cẩm nang). Ngoài ra TypeScript đã chặn ở tầng kiểu: các trường đó không còn tồn tại trong `CompanyReport`, nên viết lại sẽ lỗi biên dịch ngay.
+
+---
+
+## 12. Connector: chỉ đọc trang công khai, và chỉ ghi lại thứ đã thấy
+
+Connector biến một tên miền thành danh sách kênh liên hệ công khai. Nó chạy ở nơi có internet (máy người dùng hoặc server), không chạy trong sandbox.
+
+### Cam kết, và chỗ được kiểm trong test
+
+| Cam kết | Được kiểm bằng |
+| --- | --- |
+| Chỉ đọc trang công khai: không đăng nhập, không cookie, không giải CAPTCHA | Trang trả 401/403/429 hoặc chuyển hướng tới trang đăng nhập thì dừng, ghi vào danh sách "bỏ qua" |
+| Tôn trọng robots.txt | `/cart` bị chặn thì không được gọi — test khẳng định không có request nào tới URL đó |
+| Chỉ đi trong tên miền của công ty | Link Facebook, link ngoài đều bị bỏ; test khẳng định mọi request đều thuộc tên miền gốc |
+| Không sinh email theo pattern | Test khẳng định mọi email trả về đều có **nguyên văn** trong HTML |
+| Mọi giá trị có nguồn và bằng chứng | Không giá trị nào thiếu `sourceUrl` hoặc `evidenceSnippet` |
+| Thứ của bên thứ ba không lọt vào danh sách | Email khác tên miền vào mục "đã loại trừ"; số điện thoại nằm cùng khối với email bên thứ ba cũng bị loại, **trừ khi** email của chính công ty cũng ở ngay đó |
+| Không tự thêm mã quốc gia | Số `707.452.2800` giữ nguyên `7074522800`, không thành `+17074522800` |
+| Không tự bịa WhatsApp | Không thấy `wa.me` thì ghi "chưa thấy", kèm ghi chú nếu trang chỉ có chat trực tuyến |
+| Chặn SSRF | `localhost`, `.internal`, `127.0.0.1`, `169.254.169.254`, `file://` đều bị chặn **trước khi mở kết nối**, cả khi tên miền công cộng nhưng phân giải vào IP nội bộ |
+
+### Cái connector không làm
+
+- **Không lấy tên người từ LinkedIn.** Hồ sơ cá nhân nằm sau login wall; connector không đăng nhập nên không đọc. Nó chỉ lấy **URL profile nếu trang công ty tự công bố**, và luôn ở mức "liên hệ thủ công".
+- **Không đoán email** theo pattern `ten.ho@congty.com`, kể cả khi rất chắc. Muốn có thì phải đi qua bảng `contact_candidates` + kiểm tra mailbox (migration 006).
+- **Không tìm người qua mạng xã hội hay nguồn trả tiền chưa mua license.**
+- **Không lưu vào database ở bước này.** Kết quả trả về API, chưa ghi bảng nào — cần apply migration 002–006 trước.
+
+### Cách chạy
+
+```bash
+npm run connector:test          # 71 check trên fixture HTML thật, không cần internet
+npm run connector:run mariani.com            # chạy thật, in dạng người đọc
+npm run connector:run mariani.com -- --json  # in JSON đầy đủ
+```
+
+Hoặc qua API: `POST /api/connector` với `{ "domain": "mariani.com" }`.
+
+### Kết quả trên fixture Mariani (dùng đúng câu chữ đã đối chiếu)
+
+- 4 email công bố: `productinfo@`, `ssousa@`, `tgarcia@`, `ingredients@` (email bộ phận nguyên liệu);
+- điện thoại công ty + fax tách nhãn riêng (fax không phải kênh liên hệ);
+- LinkedIn công ty, ở mức liên hệ thủ công;
+- 2 người công bố kèm email: Steve Sousa, Todd Garcia;
+- loại trừ đúng: `mariani@worldpantry.com` và số `989-514-1459` của đơn vị vận hành web store;
+- "chưa thấy": WhatsApp, kèm ghi chú trang chỉ có chat trực tuyến (Gorgias).

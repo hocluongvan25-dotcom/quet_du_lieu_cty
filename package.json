@@ -9,6 +9,8 @@
     "lint": "eslint",
     "supabase:check": "node scripts/check-supabase.mjs",
     "check:content": "node scripts/check-content.mjs",
+    "connector:test": "node scripts/test-connector.mjs",
+    "connector:run": "node scripts/run-connector.mjs",
     "db:verify": "node scripts/verify-sql.mjs",
     "retention:run": "node scripts/run-retention.mjs"
   },
