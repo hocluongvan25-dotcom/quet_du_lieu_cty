@@ -10,6 +10,8 @@ export type Source = {
 };
 
 /** How sure we are that a value is the real one (mirrors `channel_certainty`). */
+import type { Requirement } from "@/lib/requirements";
+
 export type Certainty = "confirmed" | "probable" | "inferred";
 
 /** Whose address this is (mirrors `identity_match`). Delivery is a separate question. */
@@ -67,6 +69,8 @@ export type IntelNote = {
 };
 
 export type CompanyReport = {
+  /** Điều kiện & giấy tờ nhà nhập khẩu công bố đối với nhà cung cấp. */
+  requirements?: Requirement[];
   id: string;
   companyName: string;
   initials: string;

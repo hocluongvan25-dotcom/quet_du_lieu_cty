@@ -1,5 +1,6 @@
 import type { CompanyReport, Contact, ReportStatus, Source } from "@/lib/demo-data";
 import type { AppLocale } from "@/lib/i18n";
+import type { Requirement, RequirementCategory } from "@/lib/requirements";
 
 /**
  * Maps Supabase rows onto the report shape the dashboard renders.
@@ -118,6 +119,29 @@ function daysLeft(value: string) {
   return Math.max(0, Math.ceil((date.getTime() - Date.now()) / 86_400_000));
 }
 
+const REQUIREMENT_CATEGORIES: RequirementCategory[] = ["certification", "document", "audit", "terms", "labelling"];
+
+/** Đọc lại yêu cầu nhà cung cấp đã lưu trong `report_data`. Dữ liệu lạ bị bỏ qua. */
+function readRequirements(reportData: unknown): Requirement[] {
+  if (!reportData || typeof reportData !== "object") return [];
+  const raw = (reportData as { requirements?: unknown }).requirements;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as Partial<Requirement>;
+    if (!item.label || !item.detail || !item.sourceUrl) return [];
+    return [{
+      id: item.id ?? `req-${String(item.label)}`,
+      category: REQUIREMENT_CATEGORIES.includes(item.category as RequirementCategory) ? (item.category as RequirementCategory) : "document",
+      label: String(item.label),
+      detail: String(item.detail),
+      sourceUrl: String(item.sourceUrl),
+      kind: item.kind === "pdf" ? "pdf" : "html",
+      certainty: "confirmed" as const,
+    }];
+  });
+}
+
 function readSignals(reportData: unknown): string[] {
   if (!reportData || typeof reportData !== "object") return [];
   const signals = (reportData as { signals?: unknown }).signals;
@@ -186,6 +210,7 @@ export function toCompanyReportView(options: {
     website: report.official_website?.replace(/^https?:\/\//, "") ?? undefined,
     lastUpdated: formatMoment(report.captured_at, locale),
     contacts,
+    requirements: readRequirements(report.report_data),
     sources,
     signals: signals.length > 0 ? signals : [locale === "vi" ? "Có evidence nguồn" : "Source evidence attached"],
   };

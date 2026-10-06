@@ -7,6 +7,7 @@
  */
 
 import { decodeEntities, htmlToLines, registrableDomain } from "./html";
+import { findRequirements } from "@/lib/requirements";
 import type { Certainty, ChannelPolicy, ConnectorNote, FoundChannel, FoundPerson, IdentityMatch, PageExtraction, TargetFamily } from "./types";
 
 const EMAIL_RE = /[A-Za-z0-9._%+'\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
@@ -142,6 +143,7 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
   const channels: FoundChannel[] = [];
   const notes: ConnectorNote[] = [];
   const people: FoundPerson[] = [];
+  const requirements = findRequirements({ url, lines, kind });
   const seen = new Set<string>();
 
   const push = (channel: FoundChannel) => {
@@ -362,7 +364,7 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
     });
   }
 
-  return { channels, people, notes };
+  return { channels, people, requirements, notes };
 }
 
 export function extractFromPage({ url, html, targets = ["email", "phone", "whatsapp", "linkedin", "form"] }: ExtractInput): PageExtraction {

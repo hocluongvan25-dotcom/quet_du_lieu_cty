@@ -76,7 +76,7 @@ function toPersistencePayload(report: CompanyReport) {
     public_business_phone: contactByType.get("phone")?.value ?? null,
     whatsapp_business_url: contactByType.get("whatsapp")?.value ?? null,
     confidence: report.confidence,
-    report_data: { signals: report.signals, provider: "demo" },
+    report_data: { signals: report.signals, requirements: report.requirements ?? [], provider: "demo" },
     provider_trace: { provider: "demo-provider", captured_by: "seekora-app" },
   };
 

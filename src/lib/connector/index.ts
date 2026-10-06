@@ -21,6 +21,7 @@ import { fetchPage } from "./fetch";
 import { pdfToLines } from "./pdf";
 import { planDiscovery, normalizeSeed, hostOf, type DiscoveryOptions } from "./discover";
 import { registrableDomain } from "./html";
+import { mergeRequirements, sortRequirements, type Requirement } from "@/lib/requirements";
 import type { ConnectorNote, ConnectorResult, FoundChannel, FoundPerson, PageReport, TargetFamily } from "./types";
 
 export type RunConnectorOptions = DiscoveryOptions & {
@@ -51,6 +52,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
   const pages: PageReport[] = [];
   const channels: FoundChannel[] = [];
   const people = new Map<string, FoundPerson>();
+  let requirements: Requirement[] = [];
   const notes: ConnectorNote[] = [];
   const seenChannels = new Set<string>();
 
@@ -106,6 +108,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
       people.set(person.name.toLowerCase(), person);
     });
 
+    requirements = mergeRequirements(requirements, extracted.requirements);
     notes.push(...extracted.notes);
     pages.push({ url: outcome.finalUrl, status: outcome.status, channels: extracted.channels.length, kind: "html" });
 
@@ -161,6 +164,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
       people.set(person.name.toLowerCase(), person);
     });
 
+    requirements = mergeRequirements(requirements, extracted.requirements);
     notes.push(...extracted.notes);
     pages.push({ url: outcome.finalUrl, status: outcome.status, channels: extracted.channels.length, kind: "pdf" });
 
@@ -207,6 +211,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
     pages,
     channels,
     people: [...people.values()],
+    requirements: sortRequirements(requirements),
     notes: dedupedNotes,
     pagesFetched,
   };

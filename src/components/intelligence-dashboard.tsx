@@ -43,7 +43,7 @@ import { CompanyReport, Contact, initialReports } from "@/lib/demo-data";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { SignOutButton } from "@/components/sign-out-button";
 import { WorkspaceNotice } from "@/components/workspace-notice";
-import { PeoplePanel } from "@/components/contact-intel";
+import { PeoplePanel, RequirementsPanel } from "@/components/contact-intel";
 import { buildReportSections } from "@/lib/report-sections";
 import { DEMO_CREDITS, REPORT_COST, type WorkspaceSnapshot } from "@/lib/data/workspace-types";
 import { getCopy, normalizeLocale, type AppLocale } from "@/lib/i18n";
@@ -662,6 +662,8 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
           </div>
 
           {people.length > 0 ? <PeoplePanel locale={locale} people={people} onCopy={onCopy} /> : null}
+
+          {report.requirements && report.requirements.length > 0 ? <RequirementsPanel locale={locale} requirements={report.requirements} /> : null}
 
           {detailChannels.length > 0 ? (
             <section className="mt-6">

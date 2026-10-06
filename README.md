@@ -188,6 +188,7 @@ Writes come from connectors running with the service role; members only read (`i
 ```bash
 npm run export:test   # 43 checks, including re-reading the CSV with an RFC 4180 parser
 npm run report:test   # 19 checks: person channels merge onto the person card, nothing lost or invented
+npm run requirements:test # 24 checks: supplier requirements kept verbatim, sourced, never invented
 ```
 
 ### What the system finds
@@ -201,6 +202,16 @@ Not found today: personal mobile numbers (LinkedIn has no phone field; under ~5%
 ### What the AI actually does (and what it must do next)
 
 Reading one company website is not a product — anyone can do that in five minutes. The value is in reading **many** sources, merging them into one correct entity, pointing at the right door and keeping it fresh, plus the layer Google does not have: customs/registry data. `docs/buyer-discovery-spec.md` §14 lays out the source layers (company pages → press/PDF/trade-fair directories → government registries → trade data → enrichment vendors → mailbox verification → monitoring) with cost and legal status for each, and splits the AI's job into what it does today (understanding one page: which email belongs to the company, which number is a fax, which name goes with which address) versus what it must do next (choosing which sources to read, entity resolution across sources, reading long documents into a supplier-requirements checklist, resolving conflicts, and matching a Vietnamese supplier's product/HS code to what a buyer actually imports).
+
+### Supplier requirements & documents
+
+The report carries a block listing what the buyer itself publishes as a condition for its suppliers: certifications (BRCGS, SQF, HACCP, ISO, FSSC, GlobalG.A.P., Kosher, Halal, organic), documents (COA, COO, phytosanitary, fumigation, health certificate, product liability insurance, W-9, food safety plan, specification sheet, MRL, aflatoxin), audits (SMETA/Sedex, BSCI, SA8000, third-party audit) and commercial terms (MOQ, payment terms, lead time, pre-shipment sample).
+
+A line only becomes an item when it names one of those and either carries requirement wording (`must`, `required`, `provide`, `submit`, `audited`, "yêu cầu", "phải") or sits under a requirement heading (`Supplier requirements`, `Required documents`, `Vendor approval`) within four lines. Sentences about the buyer itself — "We are BRCGS certified since 1998", "our own facility is audited" — are skipped unless they address suppliers. The item keeps the buyer's **verbatim sentence** as evidence, a Vietnamese label, a group, and the URL (page or PDF) it came from. Nothing is inferred and nothing is recommended; when a buyer publishes no requirements, the block does not appear at all.
+
+```bash
+npm run requirements:test   # 24 checks: no fabrication, verbatim evidence, sources, PDF, no advice
+```
 
 ### Connector: public sources to sourced channels
 

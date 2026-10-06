@@ -7,6 +7,7 @@
  */
 
 import type { DecisionMaker, IntelNote, Contact } from "@/lib/demo-data";
+import type { Requirement } from "@/lib/requirements";
 import type { ConnectorResult, FoundChannel } from "./types";
 
 const TYPE_LABELS: Record<FoundChannel["type"], string> = {
@@ -65,6 +66,11 @@ export function resultToPeople(result: ConnectorResult): DecisionMaker[] {
       policy: value.includes("@") ? ("needs_mailbox_check" as const) : ("manual_contact_only" as const),
     })),
   }));
+}
+
+/** Yêu cầu nhà nhập khẩu công bố — giữ nguyên câu chữ và nguồn, không diễn giải. */
+export function resultToRequirements(result: ConnectorResult): Requirement[] {
+  return result.requirements;
 }
 
 export function resultToNotes(result: ConnectorResult): IntelNote[] {

@@ -351,10 +351,10 @@ Kiểm chứng: `npm run export:test` — 43 check, gồm đọc lại CSV bằn
 | Dữ liệu thương mại trả phí (CBP manifest qua ImportYeti / Volza / Panjiva) | chưa cắm; đây là nguồn trade signal, không phải nguồn contact |
 | Sổ đăng ký nhà nước (UK Companies House, SEC EDGAR) | chưa cắm — miễn phí, là lớp tiếp theo nên làm |
 | Hội chợ / hiệp hội ngành | chưa cắm — không có API, phải đọc trang danh sách nhà triển lãm |
-| Checklist giấy tờ / điều khoản nhà cung cấp phải đáp ứng | chưa làm (đang nợ) |
+| Checklist giấy tờ / điều khoản nhà cung cấp phải đáp ứng | **đã làm (06/10/2026)** — xem §15 |
 | Vai trò nhà sản xuất hay thương lái (`shipper_role`) | chưa làm (đang nợ) |
 | Năm thành lập, quy mô nhân sự, địa chỉ | **mới chỉ có trong dữ liệu demo**; connector chưa trích và view thật chưa map — cần làm |
-| Checklist giấy tờ trong PDF | PDF đã đọc được, nhưng phần rút ra **checklist nhà cung cấp phải đáp ứng** chưa làm (món đang nợ) |
+| Checklist giấy tờ trong PDF | **đã làm** — xem §15 |
 
 **Giới hạn kỹ thuật đang áp:** chỉ trang công khai · tôn trọng `robots.txt` · chỉ cùng domain · không đăng nhập, không tài khoản giả, không giải CAPTCHA · chặn SSRF trước khi kết nối · mọi giá trị phải xuất hiện nguyên văn trên trang.
 
@@ -400,9 +400,42 @@ Hôm nay AI mới làm phần **nhỏ nhất**, và nên nói thẳng như vậy
 | Đọc hiểu một trang | rule + ngữ cảnh: chọn email nào là của công ty, số nào là fax, tên nào đi với email nào, loại số của web store | mở rộng khi trang lạ hơn |
 | **Chọn nguồn để đọc** | cố định vài đường dẫn (`/contact`, `/about`, `/suppliers`…) | tự quyết định: công ty thực phẩm Mỹ thì đọc tiếp trang vendor/supplier, PDF annual report, press release, hội chợ nào |
 | **Hợp nhất thực thể** | chưa có | cùng một công ty ở website + sổ đăng ký + dữ liệu hải quan + báo chí → một hồ sơ, không nhân bản, không lẫn công ty trùng tên |
-| **Đọc tài liệu dài** | chưa có | PDF/báo cáo/trang supplier → **checklist giấy tờ nhà cung cấp phải đáp ứng** (món đang nợ) |
+| **Đọc tài liệu dài** | **đã có bước đầu**: đọc chữ trong PDF, nhận diện chứng nhận/giấy tờ/điều khoản và giữ nguyên câu gốc (§15) | rút gọn thành checklist nhóm theo loại, và đọc được cả bảng biểu trong PDF |
 | **Đối chiếu mâu thuẫn** | ghi cả hai, không phán | hai nguồn nói khác nhau → giữ cả hai kèm ngày, biết cái nào mới hơn |
 | **Theo dõi thay đổi** | có bảng `report_changes` | đọc lại đúng thứ đã đổi, không đọc lại tất cả |
 | **Khớp sản phẩm ↔ người mua** | chưa có | HS code + sản phẩm của nhà cung cấp Việt ↔ mặt hàng buyer đang nhập ↔ nhà máy phù hợp |
 
 **Tóm lại:** giá trị không nằm ở việc đọc một trang web — việc đó ai cũng làm được. Nó nằm ở **đọc nhiều nguồn, hợp nhất thành một hồ sơ đúng, chỉ ra cửa vào đúng, và giữ nó tươi** — cộng thêm lớp dữ liệu mà Google không có (hải quan, sổ đăng ký). Nguồn nào cắm thêm là quyết định về ngân sách và pháp lý, không phải quyết định kỹ thuật.
+
+---
+
+## 15. Điều kiện & giấy tờ nhà cung cấp phải đáp ứng (06/10/2026)
+
+Tiêu chí "điền đủ" từ đầu dự án: mọi điều khoản/giấy tờ nhà cung cấp phải đáp ứng đều phải hiện trong report. Phần này giờ đã chạy.
+
+### Tìm ở đâu
+
+Trong mọi nguồn đã đọc — trang HTML **và** PDF (báo cáo thường niên, press release, catalogue, tài liệu nhà cung cấp). Đây là lý do phần đọc PDF được làm trước: yêu cầu nhà cung cấp hầu như luôn nằm trong tài liệu, không nằm trên trang chủ.
+
+### Điều kiện để một câu thành một mục
+
+Một dòng chỉ được ghi nhận khi có **cả hai**:
+
+1. **Có ký hiệu của một loại giấy tờ/chứng nhận** trong danh mục (BRCGS, SQF, HACCP, ISO 22000/9001, FSSC 22000, GMP/GHP, GlobalG.A.P., Kosher, Halal, hữu cơ, FDA, FSVP, SMETA/Sedex, BSCI, SA8000, COA, COO, kiểm dịch thực vật, hun trùng, health certificate, bảo hiểm trách nhiệm sản phẩm, W-9, kế hoạch an toàn thực phẩm, truy xuất nguồn gốc, phiếu thông số, MRL/dư lượng, aflatoxin/kim loại nặng, nhãn mác, dị ứng, audit bên thứ ba, MOQ, điều khoản thanh toán, lead time, mẫu trước khi giao);
+2. **Có dấu hiệu yêu cầu** (`must`, `shall`, `required`, `comply`, `provide`, `submit`, `approved`, `audited`, `prior to shipment`, "yêu cầu", "phải", "đáp ứng"…), **hoặc** dòng nằm ngay dưới một tiêu đề yêu cầu (`Supplier requirements`, `Required documents`, `Vendor approval`… trong vòng 4 dòng).
+
+Điều khoản thương mại tự nó là dữ liệu: câu "Our minimum order quantity is one container and payment terms are net 30 days" không có chữ `must` nào nhưng chính là thứ nhà cung cấp cần biết, nên các cụm MOQ / payment terms / L/C / net N days / lead time / sample cũng được tính là dấu hiệu.
+
+### Chống đọc nhầm
+
+Câu nói về **chính nhà nhập khẩu** không phải yêu cầu đối với nhà cung cấp. Nếu câu khớp `we are / we have / our plant / our facility / our company / our brand` **và** không hướng tới nhà cung cấp (`suppliers`, `vendors`, "nhà cung cấp", `you must`), câu đó bị bỏ. Ví dụ bị bỏ đúng: "We are BRCGS certified since 1998", "Our own facility is audited to BRCGS standard".
+
+### Lưu và hiển thị gì
+
+Mỗi mục gồm: nhãn tiếng Việt (bản dịch tên loại giấy tờ), **nguyên văn câu của nhà nhập khẩu** (bằng chứng, không viết lại), nhóm (chứng nhận / giấy tờ / kiểm tra / điều khoản / nhãn mác), URL nguồn, và nguồn là trang hay PDF. Không có lời khuyên, không xếp hạng, không suy diễn thêm: đây là chính sách của nhà nhập khẩu, không phải khuyến nghị của nền tảng.
+
+Report hiển thị theo thứ tự: chứng nhận → kiểm tra → giấy tờ → điều khoản → nhãn mác. **Không tìm thấy thì không hiện gì** — không có mục "không tìm thấy" cho người dùng.
+
+Yêu cầu được lưu vào `report_data.requirements` cùng report, nên mở lại report là còn nguyên.
+
+Kiểm chứng: `npm run requirements:test` — 24 check, gồm: bỏ câu tự khoe chứng nhận, giữ nguyên văn câu, mỗi mục có nguồn, gạch đầu dòng dưới tiêu đề vẫn được tính, trang không có yêu cầu thì ra 0 mục, đọc được từ PDF, và không mục nào chứa lời khuyên.

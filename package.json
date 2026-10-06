@@ -12,6 +12,7 @@
     "connector:test": "node scripts/test-connector.mjs",
     "export:test": "node scripts/test-export.mjs",
     "report:test": "node scripts/test-report-sections.mjs",
+    "requirements:test": "node scripts/test-requirements.mjs",
     "connector:run": "node scripts/run-connector.mjs",
     "db:verify": "node scripts/verify-sql.mjs",
     "retention:run": "node scripts/run-retention.mjs"

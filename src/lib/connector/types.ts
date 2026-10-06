@@ -32,6 +32,8 @@ export type FoundPerson = {
   channelValues: string[];
 };
 
+import type { Requirement } from "@/lib/requirements";
+
 export type ConnectorNote = {
   kind: "not_found" | "excluded" | "skipped";
   label: string;
@@ -54,6 +56,8 @@ export type ConnectorResult = {
   pages: PageReport[];
   channels: FoundChannel[];
   people: FoundPerson[];
+  /** Yêu cầu/giấy tờ nhà nhập khẩu công bố đối với nhà cung cấp, kèm câu chữ gốc. */
+  requirements: Requirement[];
   notes: ConnectorNote[];
   /** Số trang đã tải thực tế. */
   pagesFetched: number;
@@ -64,5 +68,6 @@ export type TargetFamily = "email" | "phone" | "whatsapp" | "linkedin" | "form";
 export type PageExtraction = {
   channels: FoundChannel[];
   people: FoundPerson[];
+  requirements: Requirement[];
   notes: ConnectorNote[];
 };
