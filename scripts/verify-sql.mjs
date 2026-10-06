@@ -55,6 +55,13 @@ await db.exec(`
     select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
   $$;
   grant usage on schema auth to anon, authenticated, service_role;
+  grant usage on schema public to anon, authenticated, service_role;
+
+  -- Supabase grants table privileges to anon/authenticated when a table is
+  -- created. Setting default privileges (instead of granting after the
+  -- migrations) keeps the revokes written inside the migrations meaningful.
+  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
 `);
 
 const migrationFiles = readdirSync(MIGRATIONS_DIR)
@@ -84,12 +91,9 @@ for (const name of migrationFiles) {
   }
 }
 
-// Mirror Supabase's default privileges so RLS is the only gate left.
-await db.exec(`
-  grant usage on schema public to anon, authenticated, service_role;
-  grant all on all tables in schema public to anon, authenticated, service_role;
-  grant all on all sequences in schema public to anon, authenticated, service_role;
-`);
+// Nothing to grant here: the default privileges above already covered every
+// table the migrations created, so RLS and the explicit revokes are the only
+// gates left.
 
 const asUser = (userId) => db.query("select set_config('request.jwt.claim.sub', $1, false)", [userId]);
 
@@ -303,6 +307,189 @@ check(
   JSON.stringify(survivingChanges[0]),
 );
 check("other snapshots untouched", (await db.query("select count(*)::int as n from public.company_reports where id = $1", [reportId])).rows[0].n === 1);
+
+section("buyer discovery (005)");
+const sourceCount = (await db.query("select count(*)::int as n from public.market_sources")).rows[0].n;
+check("source catalogue seeded", sourceCount >= 8, `${sourceCount} sources`);
+
+const importyetiSource = (await db.query("select licence_type, allows_resale from public.market_sources where key = 'importyeti'")).rows[0];
+check("ImportYeti recorded as public record without resale rights", importyetiSource.licence_type === "public-record" && importyetiSource.allows_resale === false, JSON.stringify(importyetiSource));
+check("Companies House marked reusable", (await db.query("select allows_resale from public.market_sources where key = 'companies_house'")).rows[0].allows_resale === true);
+
+const tradeSourceId = (await db.query("select id from public.market_sources where key = 'importyeti'")).rows[0].id;
+const registrySourceId = (await db.query("select id from public.market_sources where key = 'companies_house'")).rows[0].id;
+const websiteSourceId = (await db.query("select id from public.market_sources where key = 'company_website'")).rows[0].id;
+const licensedSourceId = (await db.query("select id from public.market_sources where key = 'volza'")).rows[0].id;
+
+const buyerId = (
+  await db.query(
+    `insert into public.buyer_profiles
+       (organization_id, legal_name, display_name, country, region, city, website, domain, industry, target_department, hs_codes, fit_score, first_signal_at, last_signal_at)
+     values ($1, 'GREAT LAKES PACKAGING LLC', 'Great Lakes Packaging', 'United States', 'Ohio', 'Cleveland',
+             'https://greatlakespackaging.example', 'greatlakespackaging.example', 'Packaging', 'procurement',
+             '{4819.10,4819.20}', 86, now() - interval '2 years', now() - interval '12 days')
+     returning id`,
+    [orgId],
+  )
+).rows[0].id;
+check("buyer stored with fit score and HS codes", (await db.query("select fit_score from public.buyer_profiles where id = $1", [buyerId])).rows[0].fit_score === 86);
+
+const duplicateBuyer = await expectFailure(
+  "insert into public.buyer_profiles (organization_id, legal_name, display_name, country, domain) values ($1, 'Dup', 'Dup', 'United States', 'greatlakespackaging.example')",
+  [orgId],
+  "duplicate key",
+);
+check("the same buyer domain cannot be added twice", duplicateBuyer.ok, duplicateBuyer.message);
+
+await db.query(
+  `insert into public.trade_signals
+     (organization_id, buyer_profile_id, market_source_id, shipment_date, supplier_name, supplier_country, hs_code, product_description, weight_kg, containers, record_reference)
+   values ($1, $2, $3, '2026-09-24', 'Zhongshan Carton Co', 'China', '4819.10', 'Corrugated cartons', 18240.5, 2, 'BOL123456')`,
+  [orgId, buyerId, tradeSourceId],
+);
+check("shipment record stored", (await db.query("select count(*)::int as n from public.trade_signals where buyer_profile_id = $1", [buyerId])).rows[0].n === 1);
+
+const duplicateSignal = await expectFailure(
+  "insert into public.trade_signals (organization_id, buyer_profile_id, market_source_id, shipment_date, record_reference) values ($1, $2, $3, '2026-09-24', 'BOL123456')",
+  [orgId, buyerId, tradeSourceId],
+  "duplicate key",
+);
+check("the same bill of lading cannot be stored twice", duplicateSignal.ok, duplicateSignal.message);
+
+const personId = (
+  await db.query(
+    `insert into public.decision_makers
+       (organization_id, buyer_profile_id, market_source_id, full_name, job_title, department, grade, source_url, corroboration_count, expires_at)
+     values ($1, $2, $3, 'Dana Whitfield', 'Director', 'Executive', 'a',
+             'https://find-and-update.company-information.service.gov.uk/company/01234567/officers', 2, now() + interval '90 days')
+     returning id`,
+    [orgId, buyerId, registrySourceId],
+  )
+).rows[0].id;
+
+const gradeAWithoutName = await expectFailure(
+  "insert into public.decision_makers (organization_id, buyer_profile_id, grade, source_url) values ($1, $2, 'a', 'https://x.example')",
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("grade A without a name is rejected", gradeAWithoutName.ok, gradeAWithoutName.message);
+
+const gradeCWithName = await expectFailure(
+  "insert into public.decision_makers (organization_id, buyer_profile_id, grade, full_name, department, source_url) values ($1, $2, 'c', 'Someone', 'Procurement', 'https://x.example')",
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("grade C carrying a name is rejected", gradeCWithName.ok, gradeCWithName.message);
+
+const roleSignalId = (
+  await db.query(
+    `insert into public.decision_makers
+       (organization_id, buyer_profile_id, grade, full_name, job_title, department, source_url, expires_at)
+     values ($1, $2, 'c', null, 'Procurement Manager', 'Procurement', 'https://greatlakespackaging.example/careers', now() - interval '1 day')
+     returning id`,
+    [orgId, buyerId],
+  )
+).rows[0].id;
+check("role signal without a name is accepted", Boolean(roleSignalId));
+
+await db.query(
+  `insert into public.contact_channels
+     (organization_id, buyer_profile_id, decision_maker_id, market_source_id, channel_type, value, provenance, source_url, is_verified, verified_at, expires_at)
+   values ($1, $2, $3, $4, 'email', 'procurement@greatlakespackaging.example', 'company_site',
+           'https://greatlakespackaging.example/contact', true, now(), now() + interval '90 days')`,
+  [orgId, buyerId, personId, websiteSourceId],
+);
+check("public company channel accepted", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerId])).rows[0].n === 1);
+
+const guessedChannel = await expectFailure(
+  `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, source_url, is_guessed)
+   values ($1, $2, 'email', 'dana.whitfield@greatlakespackaging.example', 'company_site', 'https://greatlakespackaging.example/contact', true)`,
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("a pattern-guessed email is structurally impossible", guessedChannel.ok, guessedChannel.message);
+
+const privateChannel = await expectFailure(
+  `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, is_public)
+   values ($1, $2, 'phone', '+1 216 555 0143', 'company_site', false)`,
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("a non-public channel is rejected", privateChannel.ok, privateChannel.message);
+
+const emailWithoutSource = await expectFailure(
+  `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance)
+   values ($1, $2, 'email', 'sales@greatlakespackaging.example', 'company_site')`,
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("an email without a source url is rejected", emailWithoutSource.ok, emailWithoutSource.message);
+
+const licensedWithoutSource = await expectFailure(
+  `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, source_url)
+   values ($1, $2, 'phone', '+1 216 555 0143', 'licensed_contact_db', 'https://volza.com/x')`,
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("licensed contact data must name its source row", licensedWithoutSource.ok, licensedWithoutSource.message);
+
+const licensedChannelId = (
+  await db.query(
+    `insert into public.contact_channels
+       (organization_id, buyer_profile_id, market_source_id, channel_type, value, provenance, source_url, expires_at)
+     values ($1, $2, $3, 'phone', '+1 216 555 0143', 'licensed_contact_db', 'https://volza.com/company/great-lakes-packaging', now() - interval '1 day')
+     returning id`,
+    [orgId, buyerId, licensedSourceId],
+  )
+).rows[0].id;
+check("licensed channel accepted when the source is named", Boolean(licensedChannelId));
+
+const orphanBuyerId = (
+  await db.query(
+    `insert into public.buyer_profiles (organization_id, legal_name, display_name, country, domain, created_at, last_signal_at)
+     values ($1, 'FORGOTTEN BUYER LTD', 'Forgotten Buyer', 'United States', 'forgotten-buyer.example', now() - interval '60 days', null)
+     returning id`,
+    [orgId],
+  )
+).rows[0].id;
+
+await db.query("set role authenticated");
+await asUser(userA);
+const visibleBuyers = (await db.query("select count(*)::int as n from public.buyer_profiles")).rows[0].n;
+check("member reads own buyers", visibleBuyers === 2, `saw ${visibleBuyers}`);
+check("member reads own people and channels", (await db.query("select count(*)::int as n from public.decision_makers")).rows[0].n === 2 && (await db.query("select count(*)::int as n from public.contact_channels")).rows[0].n === 2);
+check("member reads the source catalogue", (await db.query("select count(*)::int as n from public.market_sources")).rows[0].n === sourceCount);
+
+const clientWrite = await expectFailure(
+  "insert into public.buyer_profiles (organization_id, legal_name, display_name, country) values ($1, 'Client', 'Client', 'United States')",
+  [orgId],
+  "permission denied",
+);
+check("members cannot create buyers from the client", clientWrite.ok, clientWrite.message);
+
+const clientChannelWrite = await expectFailure(
+  "insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, source_url) values ($1, $2, 'email', 'x@y.example', 'company_site', 'https://y.example')",
+  [orgId, buyerId],
+  "permission denied",
+);
+check("members cannot add contact channels from the client", clientChannelWrite.ok, clientChannelWrite.message);
+
+await asUser(userB);
+check("other tenant sees no buyers", (await db.query("select count(*)::int as n from public.buyer_profiles")).rows[0].n === 0);
+check("other tenant sees no people", (await db.query("select count(*)::int as n from public.decision_makers")).rows[0].n === 0);
+check("other tenant sees no channels", (await db.query("select count(*)::int as n from public.contact_channels")).rows[0].n === 0);
+await db.query("reset role");
+
+section("personal data retention (005)");
+const purged = (await db.query("select * from public.purge_expired_people(30)")).rows[0];
+check("expired channels deleted", purged.deleted_channels === 1, JSON.stringify(purged));
+check("expired people deleted", purged.deleted_decision_makers === 1, JSON.stringify(purged));
+check("orphaned buyer profile deleted", purged.deleted_buyer_profiles === 1, JSON.stringify(purged));
+check("current person kept", (await db.query("select count(*)::int as n from public.decision_makers where id = $1", [personId])).rows[0].n === 1);
+check("current channel kept", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerId])).rows[0].n === 1);
+check("buyer with shipments kept", (await db.query("select count(*)::int as n from public.buyer_profiles where id = $1", [buyerId])).rows[0].n === 1);
+check("trade signals untouched by retention", (await db.query("select count(*)::int as n from public.trade_signals")).rows[0].n === 1);
+check("orphan profile is gone", (await db.query("select count(*)::int as n from public.buyer_profiles where id = $1", [orphanBuyerId])).rows[0].n === 0);
 
 section("retention schedule");
 let cronGuard = null;

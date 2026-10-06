@@ -89,7 +89,7 @@ The app keeps working without `.env.local`; it stays in demo mode.
 npm run db:verify
 ```
 
-Runs every file in `supabase/migrations` against an in-process Postgres (PGlite, WebAssembly) with a minimal Supabase shim, then asserts that onboarding is idempotent, that a research job reserves and settles credits atomically, that change detection records one row per moved field, that a first snapshot records nothing, that the retention sweep never orphans an artifact, that rejected calls write nothing, and that one workspace cannot read another's reports, ledger, evidence or change history. No credentials or network access needed.
+Runs every file in `supabase/migrations` against an in-process Postgres (PGlite, WebAssembly) with a minimal Supabase shim, then asserts that onboarding is idempotent, that a research job reserves and settles credits atomically, that change detection records one row per moved field, that a first snapshot records nothing, that the retention sweep never orphans an artifact, that rejected calls write nothing, that guessed or non-public contact channels cannot be stored, and that one workspace cannot read another's reports, ledger, evidence, change history or buyer data. No credentials or network access needed.
 
 ### Verify the connection
 
@@ -127,6 +127,29 @@ The dashboard runs in demo mode until a visitor signs in; after that it reads an
 Change detection runs inside `complete_research_job()`: when a company is researched again, the previous snapshot is compared field by field and a row per change is written (`added`, `removed` or `changed`, including confidence moves). Because `report_changes` stores the compared values as text and references snapshots with `ON DELETE SET NULL`, the history survives the retention sweep that removes the snapshots themselves.
 
 Not wired to real data yet: the credit activity list on the Billing page still renders sample content (the balance itself is real).
+
+### Buyer discovery (foreign markets)
+
+`docs/buyer-discovery-spec.md` explains the pipeline; migration `005` is its data model:
+
+| Table | Holds | Retention |
+| --- | --- | --- |
+| `market_sources` | Every allowed data origin with its licence terms (public record, open government licence, commercial subscription, resale rights) | Reference data |
+| `buyer_profiles` | The buyer company, its HS codes, fit score and reasons | Company data |
+| `trade_signals` | One row per shipment record: supplier, HS code, weight, containers, bill-of-lading reference | Company data, no expiry |
+| `decision_makers` | The person or role signal, with grade A (own public channel), B (company channel only) or C (role, no name) | Personal data, `expires_at` |
+| `contact_channels` | Email, phone, form, portal, per-market messaging, each with provenance and verification | Personal data, `expires_at` |
+
+Rules that are enforced by the database rather than by documentation:
+
+- `contact_channels.is_guessed` is pinned to `false` — pattern-generated emails cannot be stored.
+- `is_public` is pinned to `true` — private or personal channels cannot be stored.
+- An email always needs the `source_url` where it was seen.
+- A channel from a commercial contact database must name its `market_sources` row, so the customer always sees whose data it is.
+- Grade A/B rows must carry a name; grade C rows must not.
+- `purge_expired_people()` deletes expired people, expired channels and orphaned buyer profiles, while leaving shipment records alone.
+
+Writes come from connectors running with the service role; members only read (`insert`/`update`/`delete` are revoked from `authenticated`, and `db:verify` asserts that).
 
 ### Retention and the artifact bucket
 
@@ -211,4 +234,6 @@ supabase/migrations/001_company_intel_schema.sql
 supabase/migrations/002_workspace_and_research_rpc.sql
 supabase/migrations/003_change_monitoring_and_retention.sql
 supabase/migrations/004_retention_cron.sql
+supabase/migrations/005_buyer_discovery.sql
+docs/buyer-discovery-spec.md
 ```
