@@ -4,6 +4,11 @@ import { FormEvent, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
+  Phone,
+  MessageCircle,
+  Mail,
+  ExternalLink,
+  BriefcaseBusiness,
   AlertCircle,
   Archive,
   ArrowUpRight,
@@ -578,6 +583,26 @@ function ChannelValue({ contact, className = "" }: { contact: Contact; className
   );
 }
 
+/** The channel's own icon (mail / phone / profile / website) — not a status mark. */
+function ContactIcon({ type, size = 14 }: { type: Contact["type"]; size?: number }) {
+  const className = "shrink-0 text-[#737889]";
+  if (type === "email") return <Mail size={size} className={className} />;
+  if (type === "phone") return <Phone size={size} className={className} />;
+  if (type === "linkedin") return <BriefcaseBusiness size={size} className={className} />;
+  if (type === "whatsapp") return <MessageCircle size={size} className={className} />;
+  return <Globe2 size={size} className={className} />;
+}
+
+/** Copy is an action, not a notice — kept wherever a value is shown. */
+function CopyButton({ value, label, title, onCopy }: { value: string; label: string; title: string; onCopy: (value: string, label: string) => void }) {
+  const canCopy = value !== "Chưa xác minh" && value !== "Not verified";
+  return (
+    <button type="button" disabled={!canCopy} onClick={() => onCopy(value, label)} title={title} aria-label={`${title} ${label}`} className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[#6257E7] transition hover:bg-[#F2F0FF] disabled:cursor-not-allowed disabled:opacity-35">
+      <Copy size={12} />
+    </button>
+  );
+}
+
 function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }: { locale: AppLocale; report: CompanyReport; onClose: () => void; onCopy: (value: string, label: string) => void; onRefresh: () => void; onArchive: () => void }) {
   const t = getCopy(locale);
   // The company row only carries the company-level channels (website, LinkedIn,
@@ -611,8 +636,10 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
               {topChannels.length > 0 ? (
                 <ul className="mt-2.5 grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
                   {topChannels.map((contact) => (
-                    <li key={`${contact.label}-${contact.value}`} className="min-w-0 text-[11px] font-bold text-[#3B3F4F]" title={contact.label}>
-                      <ChannelValue contact={contact} />
+                    <li key={`${contact.label}-${contact.value}`} className="flex min-w-0 items-center gap-1.5" title={contact.label}>
+                      <ContactIcon type={contact.type} />
+                      <ChannelValue contact={contact} className="min-w-0 flex-1 text-[11px] font-bold text-[#3B3F4F]" />
+                      <CopyButton value={contact.value} label={contact.label} title={t.common.copy} onCopy={onCopy} />
                     </li>
                   ))}
                 </ul>
@@ -629,7 +656,7 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
             <div className="mt-3 flex flex-wrap gap-1.5">{report.signals.map((signal) => <span key={signal} className="rounded-full bg-[#F4F5F8] px-2 py-1 text-[10px] font-semibold text-[#6C7280]">{signal}</span>)}</div>
           </div>
 
-          {report.people && report.people.length > 0 ? <PeoplePanel locale={locale} people={report.people} /> : null}
+          {report.people && report.people.length > 0 ? <PeoplePanel locale={locale} people={report.people} onCopy={onCopy} /> : null}
 
           {detailChannels.length > 0 ? (
             <section className="mt-6">
@@ -643,9 +670,15 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
               <div className="mt-3 space-y-2">
                 {detailChannels.map((contact) => (
                   <article key={`${contact.label}-${contact.value}`} className="rounded-xl border border-[#E9EBF0] bg-white p-3.5">
-                    <h4 className="text-[13px] font-bold text-[#333747]">{contact.label}</h4>
-                    <ChannelValue contact={contact} className="mt-1 block text-[11px] font-bold text-[#3B3F4F]" />
-                    {contact.via ? <p className="mt-0.5 text-[10px] text-[#8A90A0]">{contact.via}</p> : null}
+                    <div className="flex items-center gap-2">
+                      <ContactIcon type={contact.type} />
+                      <h4 className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#333747]">{contact.label}</h4>
+                      <CopyButton value={contact.value} label={contact.label} title={t.common.copy} onCopy={onCopy} />
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 pl-[22px]">
+                      <ChannelValue contact={contact} className="min-w-0 flex-1 text-[11px] font-bold text-[#3B3F4F]" />
+                    </div>
+                    {contact.via ? <p className="mt-0.5 pl-[22px] text-[10px] text-[#8A90A0]">{contact.via}</p> : null}
                   </article>
                 ))}
               </div>
@@ -658,15 +691,24 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
             {report.sources.map((source) => (
               <div key={source.url} className="group rounded-xl border border-[#E9EBF0] bg-white p-3 transition hover:border-[#D8D3FC] hover:bg-[#FCFBFF]">
                 <a href={source.url} target="_blank" rel="noreferrer" className="block">
-                  <span className="block text-[10px] font-bold text-[#6A7080]">{source.label}</span>
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-[#6A7080]">
+                      {source.kind === "social" ? <BriefcaseBusiness size={13} className="text-[#5C70CC]" /> : source.kind === "news" ? <FileSearch size={13} className="text-[#E89C43]" /> : <Globe2 size={13} className="text-[#6C63E9]" />}
+                      {source.label}
+                    </span>
+                    <ExternalLink size={13} className="text-[#A1A6B2] group-hover:text-[#655BE7]" />
+                  </div>
                   <p className="mt-2 truncate text-[10px] text-[#9095A3]">{source.url.replace(/^https?:\/\//, "")}</p>
                 </a>
+                <div className="mt-2 flex justify-end">
+                  <button type="button" onClick={() => onCopy(source.url, source.label)} title={t.common.copy} aria-label={`${t.common.copy} ${source.label}`} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-bold text-[#6257E7] hover:bg-[#F2F0FF]"><Copy size={12} />{t.common.copy}</button>
+                </div>
               </div>
             ))}
           </div>
 
           <div className="mt-6 rounded-2xl border border-[#E5E1FE] bg-[#F9F8FF] p-4">
-            <div className="flex gap-3"><div><p className="text-[12px] font-bold text-[#484064]">{t.drawer.snapshot} {report.daysLeft} {t.common.days}</p><p className="mt-1 text-[10px] leading-4 text-[#77738D]">{locale === "vi" ? `Lưu đến ${report.expiresAt}. ` : `Stored until ${report.expiresAt}. `}{t.drawer.snapshotText}</p></div></div>
+            <div className="flex gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-[#655BE8] shadow-sm"><Clock3 size={17} /></div><div><p className="text-[12px] font-bold text-[#484064]">{t.drawer.snapshot} {report.daysLeft} {t.common.days}</p><p className="mt-1 text-[10px] leading-4 text-[#77738D]">{locale === "vi" ? `Lưu đến ${report.expiresAt}. ` : `Stored until ${report.expiresAt}. `}{t.drawer.snapshotText}</p></div></div>
             <button type="button" onClick={onArchive} className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-[#5E53E8] hover:text-[#4035CA]">{t.drawer.archive}</button>
           </div>
         </div>
