@@ -89,7 +89,7 @@ The app keeps working without `.env.local`; it stays in demo mode.
 npm run db:verify
 ```
 
-Runs every file in `supabase/migrations` against an in-process Postgres (PGlite, WebAssembly) with a minimal Supabase shim, then asserts that onboarding is idempotent, that a research job reserves and settles credits atomically, that change detection records one row per moved field, that a first snapshot records nothing, that the retention sweep never orphans an artifact, that rejected calls write nothing, that inference is labelled and short-lived (never verified), that a dead address cannot be marked verified, that the export views withhold unchecked guesses and respect tenant isolation, and that one workspace cannot read another's reports, ledger, evidence, change history or buyer data. No credentials or network access needed.
+Runs every file in `supabase/migrations` against an in-process Postgres (PGlite, WebAssembly) with a minimal Supabase shim, then asserts that onboarding is idempotent, that a research job reserves and settles credits atomically, that change detection records one row per moved field, that a first snapshot records nothing, that the retention sweep never orphans an artifact, that rejected calls write nothing, that candidates expire and cannot be promoted without a channel, that a catch-all result blocks export while `invalid` can never be verified, that the verification log keeps its history, that the export policy withholds unchecked guesses and respects tenant isolation, and that one workspace cannot read another's reports, ledger, evidence, change history or buyer data. No credentials or network access needed.
 
 ### Verify the connection
 
@@ -128,9 +128,9 @@ Change detection runs inside `complete_research_job()`: when a company is resear
 
 Not wired to real data yet: the credit activity list on the Billing page still renders sample content (the balance itself is real).
 
-### Buyer discovery (foreign markets)
+### Buyer discovery and the contact verification pipeline
 
-`docs/buyer-discovery-spec.md` explains the pipeline; migration `005` is its data model:
+`docs/buyer-discovery-spec.md` explains the pipeline. Migrations `005` and `006` are its data model — `006` is the **Contact Candidate & Verification Pipeline**: it separates what we observed from what we guessed, and makes verification an event log instead of a status column.
 
 | Table | Holds | Retention |
 | --- | --- | --- |
@@ -138,29 +138,42 @@ Not wired to real data yet: the credit activity list on the Billing page still r
 | `buyer_profiles` | The buyer company, its HS codes, fit score and reasons | Company data |
 | `trade_signals` | One row per shipment record: supplier, HS code, weight, containers, bill-of-lading reference | Company data, no expiry |
 | `decision_makers` | The person or role signal, with grade A (own public channel), B (company channel only) or C (role, no name) | Personal data, `expires_at` |
-| `contact_channels` | Email, phone, form, portal, per-market messaging, each with provenance, a confidence label and a mailbox-check status | Personal data, `expires_at` (30 days when inferred) |
+| `buyer_routes` | Published ways into a buying organisation: vendor registration, supplier portal, RFQ page, procurement page, department line. The first thing to try, before any name is known | Company data |
+| `contact_channels` | Channels **seen on a source**: email, phone, form, portal, per-market messaging, each with `source_url`, `evidence_snippet`, confidence and mailbox state | Personal data, `expires_at` |
+| `contact_candidates` | Pattern-generated hypotheses: `pattern_used`, `inference_basis`, 30-day life. Never exported directly | Personal data, 30 days |
+| `contact_verification_events` | Append-only log of each mailbox check (provider, result, raw response, cost) so an address valid in March and dead in June keeps both answers | Audit log |
+| `contact_export_policy` (view) | The single decision layer: `visible_in_app`, `exportable`, `requires_override`, `outreach_eligible`, `blocked_reason` | — |
 
 Rules that are enforced by the database rather than by documentation:
 
-- Inference is allowed but labelled: `certainty` is `confirmed` (seen published, with the page it was seen on), `probable`, or `inferred` — and an inferred value must state its `inference_basis`.
-- An `inferred` value is never `is_verified` and expires within 30 days instead of 90; `is_guessed` is generated from `certainty`, so a guess cannot be silently relabelled.
-- A profile URL can never be `inferred`: an invented handle reaches a stranger, so only found URLs are accepted.
-- `deliverability` (does the mailbox exist, checked by an email verifier) is tracked separately from `is_verified` (is it really this person's).
+- Observation and inference are different tables. A candidate must state its `pattern_used` and `inference_basis`, expires in 30 days, and can only become a channel by being promoted after a verification event.
+- `deliverability` (does the mailbox exist), `identity_match` (whose address is it) and `is_verified` (did we tie it to this person) are three separate answers.
+- **A catch-all result is not proof.** A catch-all domain accepts every address, so such a row is blocked from export by default and needs an explicit customer override. Only `valid` counts for automated outreach.
+- A profile URL can never be guessed: an invented handle reaches a stranger, so only found URLs are accepted.
 - `is_public` is pinned to `true` — private or personal channels cannot be stored.
 - An address a verifier reports as dead can never be marked verified.
 - A channel from a commercial contact database must name its `market_sources` row, so the customer always sees whose data it is.
 - Grade A/B rows must carry a name; grade C rows must not.
-- `purge_expired_people()` deletes expired people, expired channels and orphaned buyer profiles, while leaving shipment records alone.
+- `purge_expired_people()` sweeps expired people, channels and candidates, and deletes a buyer only when there is no shipment, person, channel, candidate **or route** left — a route keeps the buyer alive.
 
 What may leave the building is defined in SQL, not scattered through the app. Three views, all `security_invoker = true` so the caller's RLS still applies:
 
 | View | Purpose |
 | --- | --- |
-| `outreach_ready_channels` | Fresh, not known-dead, and either citable or (when inferred) mailbox-checked. Carries `confidence_label` |
-| `outreach_ready_contacts` | One row per usable channel with its A/B/C grade, confidence and source — this is the CSV export |
-| `buyer_outreach_summary` | Per-buyer rollup for the list screen: reachable channels, verified channels, named people, best grade |
+| `contact_export_policy` | Decides `exportable` / `requires_override` / `outreach_eligible` and returns the `blocked_reason` |
+| `outreach_ready_contacts` | Exportable rows with A/B/C grade, confidence, deliverability and any override flag — this is the CSV |
+| `buyer_outreach_summary` | Per-buyer rollup for the list screen: reachable, verified, outreach-ready, named people, best grade |
 
-The practical rule: an inferred email can be stored and shown in the app, but it only becomes exportable after a mailbox check says `valid` or `catch_all`. Verified working lists bounce around 1.2%, unverified ones around 7.8%, and purchased lists around 18.5% — 2% is the industry ceiling before mail providers start throttling a customer's domain.
+| Case | In app | CSV | Automated outreach |
+| --- | ---: | ---: | ---: |
+| Published company address, cited | yes | yes | after a mailbox check |
+| Public profile URL | yes | link only | no — manual contact |
+| Candidate, never verified | warning label | no | no |
+| Inferred, mailbox `valid` | labelled | yes, with override | needs customer confirmation |
+| `catch_all` | risky label | **no** (default) | no |
+| `invalid` / expired | audit only | no | no |
+
+An inferred email can be stored and shown in the app, but it only becomes exportable once a verifier says `valid`. The bounce figures widely quoted (verified ~1.2%, unverified ~7.8%, purchased ~18.5%) are marketing benchmarks, not a rule of nature; the firmer reference is Amazon SES, which recommends staying under 2% and reviews accounts from ~5%. Every provider has its own policy, and complaint rate, engagement, domain age and volume all matter.
 
 Writes come from connectors running with the service role; members only read (`insert`/`update`/`delete` are revoked from `authenticated`, and `db:verify` asserts that).
 
@@ -248,5 +261,6 @@ supabase/migrations/002_workspace_and_research_rpc.sql
 supabase/migrations/003_change_monitoring_and_retention.sql
 supabase/migrations/004_retention_cron.sql
 supabase/migrations/005_buyer_discovery.sql
+supabase/migrations/006_contact_candidates_and_verification.sql
 docs/buyer-discovery-spec.md
 ```

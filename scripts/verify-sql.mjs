@@ -631,6 +631,238 @@ check(
 check("buyer with shipments kept", (await db.query("select count(*)::int as n from public.buyer_profiles where id = $1", [buyerId])).rows[0].n === 1);
 check("trade signals untouched by retention", (await db.query("select count(*)::int as n from public.trade_signals")).rows[0].n === 1);
 check("orphan profile is gone", (await db.query("select count(*)::int as n from public.buyer_profiles where id = $1", [orphanBuyerId])).rows[0].n === 0);
+check("no candidates to sweep yet", purged.deleted_candidates === 0, JSON.stringify(purged));
+
+
+section("contact candidates & verification (006)");
+
+// --- A hypothesis, not a contact -------------------------------------------------
+const candidateId = (
+  await db.query(
+    `insert into public.contact_candidates
+       (organization_id, buyer_profile_id, decision_maker_id, market_source_id, channel_type, candidate_value,
+        pattern_used, inference_basis, identity_match, expires_at)
+     values ($1, $2, $3, $4, 'email', 'd.whitfield@greatlakespackaging.example',
+             'first-initial.last@domain', 'Company publishes first-initial.last for staff, domain is catch-free', 'unknown', now() + interval '25 days')
+     returning id`,
+    [orgId, buyerId, personId, websiteSourceId],
+  )
+).rows[0].id;
+check("candidate stored as a hypothesis", Boolean(candidateId));
+
+const blankPattern = await expectFailure(
+  `insert into public.contact_candidates (organization_id, buyer_profile_id, channel_type, candidate_value, pattern_used, inference_basis)
+   values ($1, $2, 'email', 'x@y.example', '   ', 'nothing')`,
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("a candidate must name the pattern it came from", blankPattern.ok, blankPattern.message);
+
+const duplicateCandidate = await expectFailure(
+  `insert into public.contact_candidates (organization_id, buyer_profile_id, channel_type, candidate_value, pattern_used, inference_basis)
+   values ($1, $2, 'email', 'd.whitfield@greatlakespackaging.example', 'first.last@domain', 'again')`,
+  [orgId, buyerId],
+  "duplicate key",
+);
+check("the same candidate is not generated twice", duplicateCandidate.ok, duplicateCandidate.message);
+
+// --- Verification is an event log, not a status column ---------------------------
+await db.query(
+  `insert into public.contact_verification_events (organization_id, candidate_id, provider, result, raw_response, cost_usd)
+   values ($1, $2, 'millionverifier', 'valid', '{"result":"ok","role":false}'::jsonb, 0.0037)`,
+  [orgId, candidateId],
+);
+check("verification event recorded", (await db.query("select count(*)::int as n from public.contact_verification_events where candidate_id = $1", [candidateId])).rows[0].n === 1);
+
+const pendingResult = await expectFailure(
+  `insert into public.contact_verification_events (organization_id, candidate_id, provider, result) values ($1, $2, 'millionverifier', 'not_checked')`,
+  [orgId, candidateId],
+  "violates check constraint",
+);
+check("an event cannot report 'not_checked'", pendingResult.ok, pendingResult.message);
+
+const eventWithoutSubject = await expectFailure(
+  `insert into public.contact_verification_events (organization_id, provider, result) values ($1, 'millionverifier', 'valid')`,
+  [orgId],
+  "violates check constraint",
+);
+check("an event must be about a candidate or a channel", eventWithoutSubject.ok, eventWithoutSubject.message);
+
+const latest = (await db.query("select latest_result, latest_provider, is_expired from public.contact_candidate_status where id = $1", [candidateId])).rows[0];
+check("candidate status exposes the newest check", latest.latest_result === "valid" && latest.latest_provider === "millionverifier" && latest.is_expired === false, JSON.stringify(latest));
+
+// A history, not an overwrite.
+await db.query(
+  `insert into public.contact_verification_events (organization_id, candidate_id, provider, result, raw_response)
+   values ($1, $2, 'neverbounce', 'catch_all', '{"result":"catch_all"}'::jsonb)`,
+  [orgId, candidateId],
+);
+const newest = (await db.query("select latest_result from public.contact_candidate_status where id = $1", [candidateId])).rows[0].latest_result;
+check("the newest check wins, the older one is still on file", newest === "catch_all" && (await db.query("select count(*)::int as n from public.contact_verification_events where candidate_id = $1", [candidateId])).rows[0].n === 2);
+
+// A candidate on its own never reaches the export.
+check("a candidate alone is not exportable", (await db.query("select count(*)::int as n from public.outreach_ready_channels where value = 'd.whitfield@greatlakespackaging.example'")).rows[0].n === 0);
+
+// --- Promotion: candidate becomes a labelled channel ----------------------------
+const promotedChannelId = (
+  await db.query(
+    `insert into public.contact_channels
+       (organization_id, buyer_profile_id, decision_maker_id, market_source_id, channel_type, value, provenance,
+        certainty, discovered_by, inference_basis, identity_match, deliverability, deliverability_checked_at, verified_by, expires_at)
+     values ($1, $2, $3, $4, 'email', 'd.whitfield@greatlakespackaging.example', 'company_site',
+             'inferred', 'inferred_pattern', 'first-initial.last@domain', 'unknown', 'valid', now(), 'millionverifier', now() + interval '25 days')
+     returning id`,
+    [orgId, buyerId, personId, websiteSourceId],
+  )
+).rows[0].id;
+
+await db.query("update public.contact_candidates set status = 'promoted', promoted_channel_id = $1 where id = $2", [promotedChannelId, candidateId]);
+const promoted = (await db.query("select status, promoted_channel_id from public.contact_candidates where id = $1", [candidateId])).rows[0];
+check("promotion links the candidate to the channel it became", promoted.status === "promoted" && promoted.promoted_channel_id === promotedChannelId);
+
+const promotionWithoutChannel = await expectFailure(
+  "update public.contact_candidates set promoted_channel_id = null where id = $1",
+  [candidateId],
+  "violates check constraint",
+);
+check("a candidate cannot stay promoted without pointing at its channel", promotionWithoutChannel.ok, promotionWithoutChannel.message);
+
+// --- The policy decides, and says why -------------------------------------------
+const policy = (await db.query("select exportable, requires_override, outreach_eligible, blocked_reason, confidence_label, deliverability_checked from public.contact_export_policy where id = $1", [promotedChannelId])).rows[0];
+check(
+  "an inferred but deliverable email is exportable with an override, never outreach-ready",
+  policy.exportable === true && policy.requires_override === true && policy.outreach_eligible === false && policy.blocked_reason === "identity_unconfirmed" && policy.confidence_label === "inferred",
+  JSON.stringify(policy),
+);
+
+const confirmedEmailPolicy = (
+  await db.query("select exportable, outreach_eligible, blocked_reason from public.contact_export_policy where value = 'procurement@greatlakespackaging.example'")
+).rows[0];
+check(
+  "a published company address exports but needs a mailbox check before sending",
+  confirmedEmailPolicy.exportable === true && confirmedEmailPolicy.outreach_eligible === false && confirmedEmailPolicy.blocked_reason === "deliverability_unchecked",
+  JSON.stringify(confirmedEmailPolicy),
+);
+
+const profilePolicy = (
+  await db.query("select exportable, outreach_eligible, blocked_reason from public.contact_export_policy where value = 'https://www.linkedin.com/in/dana-whitfield'")
+).rows[0];
+check(
+  "a profile link is exportable but never auto-contacted",
+  profilePolicy.exportable === true && profilePolicy.outreach_eligible === false && profilePolicy.blocked_reason === "manual_contact_only",
+  JSON.stringify(profilePolicy),
+);
+
+// catch_all is not good enough: the domain accepts every address.
+const catchAllChannelId = (
+  await db.query(
+    `insert into public.contact_channels
+       (organization_id, buyer_profile_id, channel_type, value, provenance, certainty, discovered_by, inference_basis,
+        identity_match, deliverability, deliverability_checked_at, verified_by, expires_at)
+     values ($1, $2, 'email', 'purchasing@greatlakespackaging.example', 'company_site', 'inferred', 'inferred_pattern',
+             'role mailbox guess', 'department', 'catch_all', now(), 'millionverifier', now() + interval '25 days')
+     returning id`,
+    [orgId, buyerId],
+  )
+).rows[0].id;
+const catchAllPolicy = (await db.query("select exportable, requires_override, outreach_eligible, blocked_reason from public.contact_export_policy where id = $1", [catchAllChannelId])).rows[0];
+check(
+  "a catch-all result blocks export by default and asks for an override",
+  catchAllPolicy.exportable === false && catchAllPolicy.requires_override === true && catchAllPolicy.outreach_eligible === false && catchAllPolicy.blocked_reason === "catch_all_needs_override",
+  JSON.stringify(catchAllPolicy),
+);
+check("catch-all rows are absent from the export view", (await db.query("select count(*)::int as n from public.outreach_ready_channels where id = $1", [catchAllChannelId])).rows[0].n === 0);
+
+// --- Department-first routes -----------------------------------------------------
+const routeId = (
+  await db.query(
+    `insert into public.buyer_routes
+       (organization_id, buyer_profile_id, market_source_id, route_kind, department, url, source_url, evidence_snippet, discovered_by)
+     values ($1, $2, $3, 'vendor_registration', 'Procurement', 'https://greatlakespackaging.example/suppliers/register',
+             'https://greatlakespackaging.example/suppliers', 'Become a supplier: complete our registration form.', 'web_research_agent')
+     returning id`,
+    [orgId, buyerId, websiteSourceId],
+  )
+).rows[0].id;
+check("vendor registration route stored", Boolean(routeId));
+
+const routeWithoutUrl = await expectFailure(
+  `insert into public.buyer_routes (organization_id, buyer_profile_id, route_kind, source_url) values ($1, $2, 'supplier_portal', 'https://x.example')`,
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("a portal route must actually have a URL", routeWithoutUrl.ok, routeWithoutUrl.message);
+
+const duplicateRoute = await expectFailure(
+  `insert into public.buyer_routes (organization_id, buyer_profile_id, route_kind, url, source_url)
+   values ($1, $2, 'vendor_registration', 'https://greatlakespackaging.example/suppliers/register', 'https://greatlakespackaging.example/suppliers')`,
+  [orgId, buyerId],
+  "duplicate key",
+);
+check("the same route is not stored twice", duplicateRoute.ok, duplicateRoute.message);
+
+// --- Tenant isolation on the new tables ------------------------------------------
+await db.query("set role authenticated");
+await asUser(userA);
+check("member reads own candidates, events and routes", (await db.query("select count(*)::int as n from public.contact_candidates")).rows[0].n === 1 && (await db.query("select count(*)::int as n from public.contact_verification_events")).rows[0].n === 2 && (await db.query("select count(*)::int as n from public.buyer_routes")).rows[0].n === 1);
+check("member reads own policy rows", (await db.query("select count(*)::int as n from public.contact_export_policy")).rows[0].n > 0);
+
+const clientCandidateWrite = await expectFailure(
+  "insert into public.contact_candidates (organization_id, buyer_profile_id, channel_type, candidate_value, pattern_used, inference_basis) values ($1, $2, 'email', 'a@b.example', 'p', 'b')",
+  [orgId, buyerId],
+  "permission denied",
+);
+check("members cannot create candidates from the client", clientCandidateWrite.ok, clientCandidateWrite.message);
+
+const clientEventWrite = await expectFailure(
+  "insert into public.contact_verification_events (organization_id, candidate_id, provider, result) values ($1, $2, 'fake', 'valid')",
+  [orgId, candidateId],
+  "permission denied",
+);
+check("members cannot forge verification events", clientEventWrite.ok, clientEventWrite.message);
+
+await asUser(userB);
+check("other tenant sees no candidates", (await db.query("select count(*)::int as n from public.contact_candidates")).rows[0].n === 0);
+check("other tenant sees no verification events", (await db.query("select count(*)::int as n from public.contact_verification_events")).rows[0].n === 0);
+check("other tenant sees no routes", (await db.query("select count(*)::int as n from public.buyer_routes")).rows[0].n === 0);
+check("other tenant sees no policy rows", (await db.query("select count(*)::int as n from public.contact_export_policy")).rows[0].n === 0);
+await db.query("reset role");
+
+await db.query("set role anon");
+const anonPolicy = await expectFailure("select count(*) from public.contact_export_policy", [], "permission denied");
+check("signed-out visitors cannot read the policy view", anonPolicy.ok, anonPolicy.message);
+await db.query("reset role");
+
+// --- Candidates expire too -------------------------------------------------------
+const staleCandidateId = (
+  await db.query(
+    `insert into public.contact_candidates (organization_id, buyer_profile_id, channel_type, candidate_value, pattern_used, inference_basis, expires_at)
+     values ($1, $2, 'email', 'stale@greatlakespackaging.example', 'first@domain', 'old guess', now() - interval '2 days')
+     returning id`,
+    [orgId, buyerId],
+  )
+).rows[0].id;
+
+// A buyer we only have a route into: still a live target, must not be swept.
+const routeOnlyBuyerId = (
+  await db.query(
+    `insert into public.buyer_profiles (organization_id, legal_name, display_name, country, domain, created_at, last_signal_at)
+     values ($1, 'ROUTE ONLY LTD', 'Route Only', 'United Kingdom', 'route-only.example', now() - interval '90 days', null)
+     returning id`,
+    [orgId],
+  )
+).rows[0].id;
+await db.query(
+  `insert into public.buyer_routes (organization_id, buyer_profile_id, route_kind, department, url, source_url)
+   values ($1, $2, 'supplier_portal', 'Procurement', 'https://route-only.example/suppliers', 'https://route-only.example/suppliers')`,
+  [orgId, routeOnlyBuyerId],
+);
+
+const sweep = (await db.query("select * from public.purge_expired_people(30)")).rows[0];
+check("expired candidates are swept", sweep.deleted_candidates === 1, JSON.stringify(sweep));
+check("stale candidate is gone", (await db.query("select count(*)::int as n from public.contact_candidates where id = $1", [staleCandidateId])).rows[0].n === 0);
+check("verified candidate survives the sweep", (await db.query("select count(*)::int as n from public.contact_candidates where id = $1", [candidateId])).rows[0].n === 1);
+check("a buyer reachable only through a route is not treated as orphaned", (await db.query("select count(*)::int as n from public.buyer_profiles where id = $1", [routeOnlyBuyerId])).rows[0].n === 1);
 
 section("retention schedule");
 let cronGuard = null;

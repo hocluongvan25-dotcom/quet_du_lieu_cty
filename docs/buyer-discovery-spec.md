@@ -1,5 +1,7 @@
 # Buyer Discovery — thị trường nước ngoài
 
+> Tên feature: **Contact Candidate & Verification Pipeline**. Không gọi là "tìm email người mua hàng": thứ được bán là một quy trình có bằng chứng và có kiểm tra, không phải một danh sách email.
+
 Phạm vi: **chỉ tìm người mua ở nước ngoài** (Mỹ, Anh, EU, Nhật, Hàn, Trung Đông…), **không** tìm kiếm doanh nghiệp Việt Nam.
 
 Mục tiêu sản phẩm:
@@ -18,9 +20,10 @@ Sản phẩm tôi bán  →  ai đang mua?  →  ai ký?  →  liên hệ bằng
 | Panjiva / ImportGenius có contact | **Không.** Cả hai ở mức company-level: "no decision-maker contacts… no contact data at any tier" |
 | Có nền tảng bán kèm người ra quyết định | **Có** — Volza (và nhóm tương tự: TradeInt, Tendata, 52wmb) bán "verified decision-maker emails & phone", ~1.500 USD/năm. Nguồn gốc các email này là scrape web/LinkedIn → **rủi ro provenance**, không phải dữ liệu chính thống |
 | Có API chính thức để lấy dữ liệu | ImportYeti/Panjiva **không** có API công khai cho SME. Muốn lấy tự động thường phải scrape → vi phạm ToS |
+| "Không đăng nhập thì scrape là hợp pháp" | **Đúng nhưng rất hẹp — không được biến thành nguyên tắc kỹ thuật.** Meta v. Bright Data (N.D. Cal., 01/2024) chỉ nói: bên scrape khi **chưa đăng nhập** thì không bị ràng buộc bởi user agreement của Meta và không vi phạm CFAA; Meta rút đơn 02/2024. Phán quyết phụ thuộc điều khoản cụ thể của nền tảng, hành vi, bằng chứng và jurisdiction, và **không** giải quyết: copyright, database rights, luật bảo vệ dữ liệu (GDPR/PDP Law), luật chống vượt access control, hay quyền lưu cache/bán lại dữ liệu. Nguyên tắc đúng: chỉ đọc nguồn công khai, không vượt access control, không tài khoản giả, không phá CAPTCHA, tôn trọng license/terms, và **đánh giá riêng từng nguồn**. |
 | Dữ liệu hải quan là công khai ở mọi thị trường | **Chỉ một số nước.** Mỹ: manifest tàu biển công khai (và được bán lại hợp pháp). Ấn Độ, Indonesia, Mexico, Brazil… có bán. **EU: dữ liệu hải quan theo lô không công khai** → tín hiệu mua ở EU yếu hơn hẳn |
 | "Agent AI tự tìm được LinkedIn và số điện thoại công ty" (như Manus) | **Đúng một phần.** Agent đọc được: trang công ty trên LinkedIn, số điện thoại/tổng đài trên website, form liên hệ, email phòng ban (`sales@`, `procurement@`), và **URL profile công khai** nếu người đó để công khai. Agent **không** lấy được: email riêng của một người cụ thể, số di động, hay lịch sử làm việc đầy đủ (nằm sau login wall — xem mục 6) |
-| "Sai vài phần trăm thì không sao" | **Đúng ở khâu tìm, sai ở khâu gửi.** Bounce rate thực tế: danh sách đã verify ~1,2% — chưa verify ~7,8% — danh sách mua sẵn ~18,5%. Ngưỡng an toàn là <2%; trên 5% là nhà cung cấp email bắt đầu throttle/khoá. Vì vậy hệ thống **cho phép đoán** ở khâu nghiên cứu, nhưng **bắt buộc kiểm tra mailbox trước khi xuất** |
+| "Sai vài phần trăm thì không sao" | **Đúng ở khâu tìm, sai ở khâu gửi.** Bounce rate là chỉ số thương mại, không phải định luật: các benchmark marketing hay dẫn (list đã verify ~1,2% — chưa verify ~7,8% — mua sẵn ~18,5%) chỉ dùng để tham khảo, không phải chuẩn phổ quát. Điều chắc chắn hơn: **Amazon SES khuyến nghị giữ dưới 2%**, xem xét tài khoản từ ~5%, tạm dừng từ ~10% — và mỗi ESP có policy riêng, còn phụ thuộc complaint rate, engagement, tuổi domain và volume. Vì vậy: **cho phép đoán ở khâu nghiên cứu, bắt buộc kiểm tra mailbox trước khi export/send** |
 
 **Kết luận kiến trúc:** nền tảng trade data cho *danh sách người mua + lịch sử mua*. Người ra quyết định phải lấy từ **nguồn chính thống**:
 
@@ -31,22 +34,43 @@ Sản phẩm tôi bán  →  ai đang mua?  →  ai ký?  →  liên hệ bằng
 
 ---
 
-## 2. Bốn lớp dữ liệu
+## 2. Các lớp dữ liệu
 
 ```text
-1. trade_signals    — lô hàng: ai nhập, mặt hàng/HS, từ đâu, khi nào, bao nhiêu   (company-level)
+Bên công ty (company-level, retention dài):
+1. trade_signals    — lô hàng: ai nhập, HS, từ đâu, khi nào, bao nhiêu
 2. buyer_profiles   — công ty người mua: định danh, website, HS, điểm phù hợp
-3. decision_makers  — con người: họ tên, chức danh, bộ phận, nguồn, lần thấy cuối
-4. contact_channels — kênh liên hệ: email/phone/form/portal, kèm provenance
+3. buyer_routes     — đường vào công ty: vendor registration, supplier portal, RFQ, trang procurement
+
+Pipeline liên hệ (dữ liệu cá nhân, có hạn dùng):
+4. contact_channels            — kênh QUAN SÁT ĐƯỢC: thấy công bố ở đâu (source_url + evidence_snippet)
+5. contact_candidates          — GIẢ THUYẾT sinh theo pattern: bắt buộc ghi pattern + cơ sở, hết hạn 30 ngày
+6. contact_verification_events — log từng lần kiểm tra mailbox, append-only (không ghi đè kết quả cũ)
+7. contact_export_policy       — lớp quyết định: visible_in_app / exportable / outreach_eligible / blocked_reason
 ```
+
+**Quan sát được và suy luận không nằm chung một bảng.** Một số điện thoại in trên trang "Contact us" và một email sinh từ pattern `first.last@` là hai loại vật thể khác nhau: khác bằng chứng, khác tuổi thọ, khác luật xuất. Trộn chúng vào nhau là cách chắc chắn nhất để một ngày nào đó email đoán bị gửi đi như email thật.
+
+Bảng quyết định (được ép trong SQL, không nằm rải rác ở UI):
+
+| Loại | Xem trong app | Export CSV | Dùng outreach |
+| --- | ---: | ---: | ---: |
+| Email/số công ty công bố, có source | Có | Có | Sau khi kiểm tra mailbox |
+| Profile URL công khai | Có | Có link | Không auto (liên hệ thủ công) |
+| Candidate chưa verify | Có nhãn cảnh báo | Không | Không |
+| Inferred + mailbox valid | Có nhãn | Có, kèm cờ override | Cần khách xác nhận |
+| Catch-all | Có nhãn risky | **Không** (mặc định) | Không |
+| Invalid / hết hạn | Chỉ trong audit | Không | Không |
 
 Nguyên tắc xuyên suốt:
 
 - **Company-level ≠ personal data.** `trade_signals` là dữ liệu doanh nghiệp, không phải dữ liệu cá nhân → retention dài hơn.
 - **Personal data phải có hạn dùng.** `decision_makers`, `contact_channels` có `expires_at` và bị dọn tự động.
 - **Provenance luôn đi kèm giá trị.** Mỗi kênh liên hệ ghi rõ nó đến từ đâu (registry / website công ty / press release / licensed db) để khách biết mức tin cậy.
-- **Được phép đoán, nhưng phải dán nhãn.** Mỗi kênh có `certainty`: `confirmed` (thấy công bố, kèm URL), `probable` (một nguồn yếu, hoặc hai nguồn yếu trùng nhau), `inferred` (sinh theo pattern). Schema bắt buộc: `inferred` phải ghi rõ `inference_basis`, **không bao giờ** được đánh dấu verified, và hết hạn sau 30 ngày. Riêng **URL profile không được suy diễn** — bịa handle là gõ cửa nhà người lạ, nên chỉ nhận giá trị tìm thấy.
-- **Đoán được ở khâu tìm, không được ở khâu gửi.** Mọi thứ đi ra ngoài (UI, CSV, CRM) đều qua view `outreach_ready_channels`: một email `inferred` chỉ được xuất sau khi đã kiểm tra mailbox (`deliverability` = `valid`/`catch_all`). `deliverability` (hộp thư có tồn tại) tách riêng khỏi `is_verified` (hộp thư đó là của đúng người).
+- **Được phép đoán, nhưng đoán là một loại vật thể riêng.** Kênh quan sát được (`contact_channels`) có `certainty` = `confirmed`/`probable` và phải có `source_url`. Giả thuyết sinh theo pattern nằm ở `contact_candidates`, **bắt buộc** ghi `pattern_used` + `inference_basis`, hết hạn sau 30 ngày và **không bao giờ** được export trực tiếp — muốn thành kênh thật thì phải qua kiểm tra rồi promote. Riêng **URL profile không được suy diễn**: bịa handle là gõ cửa nhà người lạ.
+- **Ba câu hỏi khác nhau, ba cột khác nhau.** `deliverability` = hộp thư có tồn tại (SMTP). `identity_match` = địa chỉ đó là của ai (`person`/`department`/`company_general`/`unknown`). `is_verified` = ta đã buộc được nó với đúng người chưa. Một email `valid` + `identity_match = unknown` vẫn chưa phải "contact đã xác minh".
+- **Catch-all không phải valid.** Tên miền catch-all nhận mọi địa chỉ, nên kết quả catch-all không chứng minh hộp thư tồn tại. Mặc định **không export**; muốn dùng phải có override của khách, và UI phải nói rõ lý do.
+- **Find và Send là hai bước.** Quyền xem ≠ quyền xuất ≠ quyền gửi tự động. Cả ba được tính trong `contact_export_policy` cùng `blocked_reason`.
 
 ---
 
@@ -68,15 +92,18 @@ Song song với hạng, mỗi kênh mang **nhãn tin cậy** (`verified` / `conf
 
 ```text
 1. Người dùng nhập: sản phẩm / mã HS + thị trường + vai trò đích
-2. Truy vấn trade data      → danh sách nhà nhập khẩu đang mua mặt hàng đó
-3. Chấm điểm fit            → độ mới, tần suất, tăng trưởng, nhà cung cấp hiện tại
-4. Resolve người ra quyết định → registry (UK CH / SEC / state) + website công ty
-5. Agent đọc web            → tên, chức danh, profile URL, kênh công bố (chỉ trang công khai, không login)
-6. Suy diễn kênh (nếu cần)  → gắn nhãn inferred + hạn 30 ngày + ghi rõ pattern
-7. Kiểm tra mailbox hàng loạt → valid / catch_all / invalid  (bước quyết định chất lượng danh sách)
-8. Xuất: danh sách + person card + CSV/CRM, kèm nhãn tin cậy + "last seen"
-9. Theo dõi: người đổi chức danh, kênh đổi, có lô hàng mới → timeline
+2. Truy vấn trade data       → danh sách nhà nhập khẩu đang mua mặt hàng đó
+3. Chấm điểm fit             → độ mới, tần suất, tăng trưởng, nhà cung cấp hiện tại
+4. Tìm buyer route công khai → vendor registration / supplier portal / RFQ / trang procurement   ← bước đầu tiên, chưa cần biết tên ai
+5. Tìm email & số phòng ban  → procurement@, tổng đài phòng mua
+6. Resolve con người         → registry (UK CH / SEC / state) + website + agent đọc trang công khai
+7. Chỉ khi cần mới sinh candidate theo pattern → ghi pattern + cơ sở, hạn 30 ngày, KHÔNG export
+8. Verify mailbox            → valid / catch_all / invalid, mỗi lần là một event được ghi log
+9. Export theo policy        → confirmed xuất được; candidate chỉ xuất sau khi valid, kèm cờ override
+10. Theo dõi: người đổi chức danh, kênh đổi, có lô hàng mới → timeline
 ```
+
+> **Department route trước, person sau.** Với một nhà xuất khẩu, đường ngắn nhất vào một công ty mua thường không phải là email của giám đốc mua hàng, mà là form "Become a supplier" hoặc cổng đăng ký nhà cung cấp. Route là dữ liệu công ty, không phải dữ liệu cá nhân: ít rủi ro hơn, không hết hạn theo GDPR, và nhiều khả năng đúng quy trình của người mua.
 
 Thứ tự ưu tiên thị trường: **Mỹ** (B/L công khai, tiếng Anh, dữ liệu dày nhất) → **Anh** (registry miễn phí có officers) → EU qua sổ đăng ký trả phí → các thị trường có dữ liệu hải quan bán được.
 
@@ -110,7 +137,12 @@ Thứ tự ưu tiên thị trường: **Mỹ** (B/L công khai, tiếng Anh, d�
 5. **Không hiển thị hay xuất kênh chưa kiểm tra** như thể đã xác minh — nhãn tin cậy và `deliverability` luôn đi kèm giá trị.
 6. **Không giữ dữ liệu cá nhân quá hạn** (`expires_at` + job dọn; riêng `inferred` tối đa 30 ngày).
 
-Ghi chú pháp lý (đã kiểm lại, bản trước của tôi nói sai): **Meta v. Bright Data (N.D. Cal., 01/2024) — Bright Data thắng**, toà bác claim vi phạm hợp đồng vì bên scrape không đăng nhập thì không phải "user" của Meta; Meta rút đơn 02/2024. Nghĩa là **đọc trang công khai khi chưa đăng nhập là hợp pháp ở Mỹ**. Cái còn lại là rủi ro thương mại và rủi ro GDPR/PDP: dữ liệu cá nhân vẫn cần cơ sở pháp lý và phải có hạn dùng.
+Ghi chú pháp lý — chính xác đến đâu:
+
+- **Meta v. Bright Data (N.D. Cal., 01/2024)**: Bright Data thắng ở claim vi phạm hợp đồng liên quan tới việc scrape dữ liệu công khai khi **chưa đăng nhập** (toà: không phải "user" của Meta thì không bị ràng buộc bởi user agreement), và Meta rút đơn 02/2024. Đây là phán quyết theo luật California, phụ thuộc điều khoản của Meta lúc đó và bộ bằng chứng của vụ án.
+- **hiQ v. LinkedIn không đơn giản là "public thì thắng, login thì thua"**: Ninth Circuit từng có phán quyết sơ bộ có lợi cho hiQ về CFAA, nhưng phần tranh chấp User Agreement/fake accounts đi theo hướng bất lợi, và hiQ cuối cùng dàn xếp, chấp nhận lệnh cấm, xoá dữ liệu/code và trả 500.000 USD.
+- Vì vậy **không** có nguyên tắc "không đăng nhập là đủ an toàn". Cách đúng là đánh giá riêng từng nguồn: điều khoản, license, robots, dữ liệu có phải dữ liệu cá nhân không, jurisdiction nào, và có được bán lại không.
+- Phần luôn đúng bất kể nguồn: dữ liệu cá nhân (kể cả lấy từ trang công khai) vẫn cần cơ sở pháp lý, phải có hạn dùng, và phải trả lời được câu "khách dùng nó để làm gì".
 
 Lý do không chỉ là pháp lý: email sai làm hỏng reputation tên miền của khách, và khách mất luôn kênh email cho mọi chiến dịch sau.
 
