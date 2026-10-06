@@ -45,7 +45,6 @@ import { LanguageSwitcher } from "@/components/language-switcher";
 import { SignOutButton } from "@/components/sign-out-button";
 import { WorkspaceNotice } from "@/components/workspace-notice";
 import { IntelNotesPanel, PeoplePanel, ProvenanceBadge } from "@/components/contact-intel";
-import { TargetRolesPanel } from "@/components/target-roles-panel";
 import { DEMO_CREDITS, REPORT_COST, type WorkspaceSnapshot } from "@/lib/data/workspace-types";
 import { getCopy, normalizeLocale, type AppLocale } from "@/lib/i18n";
 
@@ -100,7 +99,7 @@ function reportSummaryForClipboard(report: CompanyReport, locale: AppLocale) {
           "",
           `${isVietnamese ? "ĐẦU MỐI LIÊN HỆ" : "CONTACTS"}:`,
           ...report.people.map(
-            (person) => `• #${person.rank} ${person.name} — ${person.title} · ${person.channels.map((channel) => channel.value).join(", ")}`,
+            (person) => `• ${person.name} — ${person.title} · ${person.channels.map((channel) => channel.value).join(", ")}`,
           ),
         ]
       : []),
@@ -509,8 +508,6 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
             </div>
 
             <div className="space-y-5">
-              <TargetRolesPanel locale={locale} />
-
               <section className="rounded-[21px] border border-[#E9E8F5] bg-white p-5 shadow-[0_8px_28px_rgba(31,38,56,0.025)]">
                 <div className="flex items-start justify-between">
                   <div>
@@ -613,7 +610,7 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
             <div className="mt-3 flex flex-wrap gap-1.5">{report.signals.map((signal) => <span key={signal} className="rounded-full bg-[#F4F5F8] px-2 py-1 text-[10px] font-semibold text-[#6C7280]">{signal}</span>)}</div>
           </div>
 
-          {report.people && report.people.length > 0 ? <PeoplePanel locale={locale} people={report.people} offer={report.sellerOffer} onCopy={onCopy} /> : null}
+          {report.people && report.people.length > 0 ? <PeoplePanel locale={locale} people={report.people} onCopy={onCopy} /> : null}
 
           <div className="mt-6 flex items-center justify-between"><div><h3 className="text-[14px] font-bold text-[#333747]">{t.drawer.channels}</h3><p className="mt-1 text-[11px] text-[#8A90A0]">{t.drawer.channelsText}</p></div><span className="text-[11px] font-semibold text-[#6D63E8]">{report.contacts.length} fields</span></div>
           <div className="mt-3 space-y-2">

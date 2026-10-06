@@ -40,23 +40,19 @@ export type PersonChannel = {
   note?: string;
 };
 
-/** A decision maker or department contact: the thing the seller actually needs. */
+/** A person found in a public source, with the channels found for them. */
 export type DecisionMaker = {
   id: string;
   name: string;
   title: string;
   department: string;
   previousRole?: string;
-  /** 1 = most relevant for this search. */
-  rank: number;
-  relevance: string;
   identityMatch: IdentityMatch;
   certainty: Certainty;
   sourceLabel: string;
   sourceUrl: string;
   lastSeenAt: string;
   channels: PersonChannel[];
-  caution?: string;
 };
 
 /** What we looked for and did not find, or found and deliberately excluded. */
@@ -90,12 +86,6 @@ export type CompanyReport = {
   contacts: Contact[];
   sources: Source[];
   signals: string[];
-  /**
-   * What the seller is offering. The same company has different "right people"
-   * depending on this: a raw-material supplier needs Procurement, a finished-goods
-   * or private-label seller needs whoever owns the channel and the range.
-   */
-  sellerOffer?: "ingredients" | "packaging" | "finished_product";
   /** Decision makers / department routes, ranked for this search. */
   people?: DecisionMaker[];
   /** Not-found and excluded findings, so absence is visible instead of invented. */

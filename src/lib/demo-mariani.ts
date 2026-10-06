@@ -1,14 +1,14 @@
 import type { CompanyReport } from "@/lib/demo-data";
 
 /**
- * Mariani Packing Co., Inc. — fixture dựng từ dữ liệu CÔNG KHAI, có nguồn.
+ * Mariani Packing Co., Inc. — dữ liệu công khai, có nguồn.
  *
- * Quy tắc của fixture này giống hệt quy tắc của pipeline thật:
- *  - Mọi giá trị công ty đều có `sourceUrl` trỏ tới trang đã thấy nó (kiểm tra 06/10/2026).
- *  - Thứ nhìn thấy trên trang do công ty tự công bố → `certainty: "confirmed"`.
+ * Quy tắc của fixture này giống hệt pipeline thật:
+ *  - Mọi giá trị đều có `sourceUrl` trỏ tới trang đã thấy nó (đối chiếu 06/10/2026).
+ *  - Thứ công ty tự công bố → `certainty: "confirmed"`.
  *  - Thứ đến từ hồ sơ LinkedIn công khai nhưng chưa kiểm lại → `certainty: "probable"`,
- *    và kênh chỉ ở mức "liên hệ thủ công".
- *  - Thứ KHÔNG tìm thấy thì ghi rõ là không tìm thấy (notes), không suy diễn.
+ *    kênh ở mức "liên hệ thủ công".
+ *  - Không mang lời khuyên bán hàng: hệ thống chỉ tìm và ghi nguồn.
  *
  * Nguồn đã kiểm:
  *   https://mariani.com/pages/contact-us
@@ -29,7 +29,7 @@ export const marianiReport: CompanyReport = {
   daysLeft: 30,
   industry: "Chế biến & đóng gói trái cây sấy",
   description:
-    "Nhà sản xuất trái cây sấy lớn nhất thế giới thuộc sở hữu gia đình, thành lập 1906, trụ sở Vacaville, California. Nguyên liệu trái cây sấy của Mariani được dùng bởi nhiều thương hiệu thực phẩm lớn, và công ty có bộ phận mua nguyên liệu riêng (Bulk & Ingredients).",
+    "Nhà sản xuất trái cây sấy thuộc sở hữu gia đình, thành lập 1906, trụ sở Vacaville, California. Có bộ phận mua nguyên liệu riêng (Bulk & Ingredients).",
   website: "mariani.com",
   foundedYear: 1906,
   headcount: "201–500 nhân sự (LinkedIn)",
@@ -68,7 +68,7 @@ export const marianiReport: CompanyReport = {
       policy: "needs_mailbox_check",
     },
     {
-      label: "Email nguyên liệu (Bulk & Ingredients)",
+      label: "Email bộ phận nguyên liệu",
       value: "ingredients@mariani.com",
       type: "email",
       verified: true,
@@ -76,7 +76,7 @@ export const marianiReport: CompanyReport = {
       certainty: "confirmed",
       identityMatch: "department",
       sourceUrl: "https://mariani.com/pages/bulk-and-ingredients",
-      via: "Bộ phận nguyên liệu — kênh đúng nhất khi chào nguyên liệu thô",
+      via: "Bulk & Ingredients",
       policy: "needs_mailbox_check",
     },
     {
@@ -99,7 +99,7 @@ export const marianiReport: CompanyReport = {
       certainty: "confirmed",
       identityMatch: "person",
       sourceUrl: "https://mariani.com/pages/contact-us",
-      via: "Senior Director, Global Commodity Sales",
+      via: "Senior Director of Global Commodity Sales",
       policy: "needs_mailbox_check",
     },
     {
@@ -111,19 +111,19 @@ export const marianiReport: CompanyReport = {
       certainty: "confirmed",
       identityMatch: "person",
       sourceUrl: "https://mariani.com/pages/contact-us",
-      via: "Phụ trách Asia — Japan & China",
+      via: "Asia — Japan & China",
       policy: "needs_mailbox_check",
     },
   ],
   sources: [
     {
-      label: "Trang Contact Us (điện thoại, email, sales theo vùng)",
+      label: "Trang Contact Us",
       url: "https://mariani.com/pages/contact-us",
       kind: "website",
       verified: true,
     },
     {
-      label: "Bulk & Ingredients (email bộ phận nguyên liệu)",
+      label: "Bulk & Ingredients",
       url: "https://mariani.com/pages/bulk-and-ingredients",
       kind: "website",
       verified: true,
@@ -140,45 +140,13 @@ export const marianiReport: CompanyReport = {
       kind: "social",
     },
   ],
-  sellerOffer: "finished_product",
-  signals: [
-    "Website xác minh",
-    "Có bộ phận mua nguyên liệu riêng",
-    "Có đầu mối mua hàng công khai",
-    "Sales theo vùng công bố email",
-  ],
+  signals: ["Website xác minh", "Có bộ phận mua nguyên liệu riêng", "Có đầu mối mua hàng công khai", "Sales theo vùng công bố email"],
   people: [
-    {
-      id: "person-joe-flannigan",
-      name: "Joe Flannigan",
-      title: "VP Key Corporate Accounts",
-      department: "Sales & Marketing",
-      rank: 1,
-      relevance:
-        "Xếp hạng cho hàng thành phẩm / private label: phụ trách các kênh Club, Mass Merchandiser và Drug — người quyết định sản phẩm của bạn có vào được hệ thống bán lẻ của Mariani hay không, và là đầu mối cho một thoả thuận phân phối hoặc đồng thương hiệu.",
-      identityMatch: "person",
-      certainty: "probable",
-      sourceLabel: "Hồ sơ LinkedIn công khai",
-      sourceUrl: "https://www.linkedin.com/in/joe-flannigan-b24616b",
-      lastSeenAt: "06/10/2026",
-      caution: "Đây là đầu mối BÁN của Mariani, không phải người mua nguyên liệu. Nếu bạn chào nguyên liệu thô thì đừng bắt đầu ở đây.",
-      channels: [
-        {
-          type: "linkedin",
-          value: "linkedin.com/in/joe-flannigan-b24616b",
-          certainty: "probable",
-          policy: "manual_contact_only",
-        },
-      ],
-    },
     {
       id: "person-stacy-nygard",
       name: "Stacy Nygard",
       title: "Director, Procurement",
       department: "Procurement",
-      rank: 2,
-      relevance:
-        "Khi đã có quan hệ cung ứng, đây là người chạy onboarding nhà cung cấp, điều khoản và tiêu chuẩn đầu vào: phụ trách strategic sourcing, quản lý nhà cung cấp và có kinh nghiệm mua từ nhiều quốc gia.",
       identityMatch: "person",
       certainty: "probable",
       sourceLabel: "Hồ sơ LinkedIn công khai",
@@ -190,7 +158,6 @@ export const marianiReport: CompanyReport = {
           value: "linkedin.com/in/stacy-nygard-1517b2b",
           certainty: "probable",
           policy: "manual_contact_only",
-          note: "Kết nối và nhắn tin thủ công. Hệ thống không tự động gửi nội dung.",
         },
       ],
     },
@@ -199,21 +166,17 @@ export const marianiReport: CompanyReport = {
       name: "Bella Huk",
       title: "Purchasing Manager",
       department: "Purchasing",
-      rank: 3,
-      relevance: "Phù hợp ở bước giao dịch: xác nhận quy trình nhà cung cấp, chứng từ và tiêu chuẩn đầu vào.",
       identityMatch: "person",
       certainty: "probable",
       sourceLabel: "Hồ sơ LinkedIn công khai",
       sourceUrl: "https://www.linkedin.com/in/bella-huk-5494828a",
       lastSeenAt: "06/10/2026",
-      caution: "Hồ sơ ít thông tin (7 kết nối) — nên gửi lời mời kết nối kèm tin nhắn ngắn giới thiệu.",
       channels: [
         {
           type: "linkedin",
           value: "linkedin.com/in/bella-huk-5494828a",
           certainty: "probable",
           policy: "manual_contact_only",
-          note: "Chỉ có profile công khai; không có email cá nhân nào được công bố nên hệ thống KHÔNG sinh email theo pattern.",
         },
       ],
     },
@@ -223,15 +186,11 @@ export const marianiReport: CompanyReport = {
       title: "Sales Effectiveness Manager",
       department: "Sales",
       previousRole: "Trước đây: Senior Buyer, Buyer/Planner tại Mariani",
-      rank: 4,
-      relevance:
-        "Hiểu quy trình mua, tồn kho, đánh giá nhà cung cấp và tiêu chuẩn FDA — hữu ích để hiểu cách Mariani chọn đối tác.",
       identityMatch: "person",
       certainty: "probable",
       sourceLabel: "Hồ sơ LinkedIn công khai",
       sourceUrl: "https://www.linkedin.com/in/maggie-zabat-657abb30",
       lastSeenAt: "06/10/2026",
-      caution: "ĐÃ ĐỔI VAI TRÒ — hiện không còn giữ chức buyer. Không dùng làm đầu mối mua hàng.",
       channels: [
         {
           type: "linkedin",
@@ -241,33 +200,49 @@ export const marianiReport: CompanyReport = {
         },
       ],
     },
+    {
+      id: "person-joe-flannigan",
+      name: "Joe Flannigan",
+      title: "VP Key Corporate Accounts",
+      department: "Sales & Marketing",
+      identityMatch: "person",
+      certainty: "probable",
+      sourceLabel: "Hồ sơ LinkedIn công khai",
+      sourceUrl: "https://www.linkedin.com/in/joe-flannigan-b24616b",
+      lastSeenAt: "06/10/2026",
+      channels: [
+        {
+          type: "linkedin",
+          value: "linkedin.com/in/joe-flannigan-b24616b",
+          certainty: "probable",
+          policy: "manual_contact_only",
+        },
+      ],
+    },
   ],
   notes: [
     {
       kind: "not_found",
-      label: "Đầu mối Product Development / Innovation (chưa có tên)",
-      detail:
-        "Với hàng thành phẩm / private label, đây mới là chức danh quyết định sản phẩm có vào danh mục hay không — nhưng chưa nguồn công khai nào nêu tên. Ghi nhận là thiếu, không suy diễn. Bước connector sẽ đọc trang tuyển dụng và LinkedIn công ty để tìm vai trò này.",
+      label: "Đầu mối Product Development / Innovation",
+      detail: "Chưa tìm thấy tên nào từ nguồn công khai cho vai trò này.",
       sourceUrl: "https://mariani.com/pages/experience-meets-innovation",
     },
     {
       kind: "not_found",
       label: "WhatsApp chính thức",
       detail:
-        "Trang Contact chỉ có chat trên website (Gorgias), không có liên kết wa.me hay số WhatsApp nào được công bố. Hệ thống ghi nhận là KHÔNG tìm thấy, không suy diễn từ số tổng đài.",
+        "Trang Contact chỉ có chat trên website, không có liên kết wa.me hay số WhatsApp nào được công bố. Không suy diễn từ số tổng đài.",
       sourceUrl: "https://mariani.com/pages/contact-us",
     },
     {
       kind: "not_found",
       label: "Email cá nhân của Stacy Nygard / Bella Huk",
-      detail:
-        "Chỉ có profile LinkedIn công khai. Không có email cá nhân nào được công bố, nên không sinh email theo pattern (first.last@) — đây là loại dữ liệu chỉ được tạo khi có bước kiểm tra mailbox.",
+      detail: "Chỉ có profile LinkedIn công khai. Không sinh email theo pattern khi chưa qua bước kiểm tra mailbox.",
     },
     {
       kind: "excluded",
       label: "+1 989-514-1459 · mariani@worldpantry.com",
-      detail:
-        "Nằm trên trang Contact nhưng là của WorldPantry — đơn vị vận hành web store, không phải liên hệ của Mariani. Nếu scrape tự động sẽ rất dễ gán nhầm thành số/email công ty.",
+      detail: "Có trên trang Contact nhưng thuộc WorldPantry, đơn vị vận hành web store — không phải liên hệ của Mariani.",
       sourceUrl: "https://mariani.com/pages/contact-us",
     },
   ],

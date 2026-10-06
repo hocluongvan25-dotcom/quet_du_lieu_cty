@@ -175,9 +175,9 @@ Chỉ tính credit khi có kết quả mới; job lỗi phải hoàn credit (sch
 
 Mọi report trả cho khách phải có đủ 5 khối, theo thứ tự này. Đây là hợp đồng với người dùng, không phải gợi ý trình bày.
 
-**1. Khối công ty** — tên, website, LinkedIn, ngành, **năm thành lập, quy mô nhân sự, địa chỉ**, mô tả 1–2 câu, và **xếp hạng cho use case nào** (`sellerOffer`: nguyên liệu thô / bao bì / hàng thành phẩm–private label). Thiếu dòng use case thì thứ tự đầu mối vô nghĩa, vì cùng một công ty có "người đúng" khác nhau tuỳ bạn bán gì.
+**1. Khối công ty** — tên, website, LinkedIn, ngành, **năm thành lập, quy mô nhân sự, địa chỉ**, mô tả 1–2 câu.
 
-**2. Khối đầu mối** — xếp hạng, mỗi người có: tên, chức danh, bộ phận, **"Vì sao"** (chào gì, cho ai), **cảnh báo** nếu có (đã đổi vai trò · là sales không phải người mua · hồ sơ mỏng), nguồn + ngày thấy lần cuối, và kênh liên hệ kèm nhãn.
+**2. Khối người liên quan** — tên, chức danh, bộ phận, chức danh trước đây nếu có, nguồn + ngày thấy lần cuối, và kênh liên hệ kèm nhãn. **Không xếp hạng, không khuyến nghị nên gặp ai, không hướng dẫn cách tiếp cận.**
 
 **3. Khối kênh công ty** — điện thoại, email chung, email bộ phận, email công bố theo vùng. Mỗi dòng: giá trị, nguồn (URL), `certainty`, `identity_match`, và **được phép làm gì** (`policy`).
 
@@ -189,36 +189,10 @@ Quy tắc bắt buộc:
 
 - Không giá trị nào được xuất hiện mà thiếu nguồn hoặc thiếu nhãn tin cậy.
 - Thiếu thì ghi là thiếu. Không suy diễn, không sinh email theo pattern ở tầng này.
-- Thứ tự đầu mối phải khớp với `sellerOffer` đã nêu ở khối 1.
+- **Ranh giới sản phẩm:** hệ thống chỉ TÌM thông tin liên quan và ghi nguồn. Chọn ai, liên hệ thế nào, thứ tự ưu tiên ra sao là việc của người dùng — report không chứa lời khuyên bán hàng.
 - Mỗi kênh chỉ mang một nhãn tin cậy (`Đã thấy công bố` / `Chưa kiểm lại` / `Suy luận theo pattern`) và một quyền (`Gửi được` / `Cần kiểm tra mailbox trước khi gửi` / `Liên hệ thủ công` / `Cần bạn xác nhận`).
 - Khối 4 là chỗ thể hiện sự trung thực của sản phẩm: một report không có mục "không tìm thấy" là report chưa tìm kỹ.
 
 Ví dụ chuẩn đang chạy: `src/lib/demo-mariani.ts` (Mariani Packing, đối chiếu 06/10/2026) — gõ `Mariani` trong demo để mở.
 
 ---
-
-## 10. Vai trò đứng đầu theo ngành (tệp khách hàng: nhà cung cấp & thương mại VN)
-
-Khách hàng của sản phẩm là **nhà cung cấp / công ty thương mại Việt Nam** ở các nhóm nông sản, thực phẩm chế biến, dệt may. Họ cần tiếp cận **người mua ở nước ngoài**. "Người đứng đầu" không theo ngành một cách máy móc, mà theo **ngành × loại người mua**:
-
-| Ngành | Người mua | #1 | #2 (thường là người gác cửa) |
-| --- | --- | --- | --- |
-| Nông sản | Nhà máy / nhà chế biến | Procurement / Sourcing Manager (Commodity Buyer) | QA / Food Safety Manager |
-| Nông sản | Nhà nhập khẩu / phân phối | Buying / Purchasing Manager | QA / Technical Manager |
-| Thực phẩm chế biến | Nhà nhập khẩu / phân phối | Buying / Purchasing Manager | Category / Brand Manager |
-| Thực phẩm chế biến | Chuỗi bán lẻ (private label) | Category Buyer / Own-Brand Buyer | Product Development / Own-Brand Technologist |
-| Dệt may | Brand / chuỗi thời trang | Sourcing / Vendor Manager — **ở văn phòng mua hàng**, không ở trụ sở | QA / Compliance & Audit Manager |
-
-Ba nguyên tắc rút ra, áp dụng cho mọi ngành:
-
-1. **Người chi tiền và người gác cửa là hai người khác nhau.** QA/Compliance không mua nhưng có quyền dừng giao dịch (dư lượng thuốc BVTV ở nông sản, audit nhà máy ở dệt may, nhãn dinh dưỡng ở thực phẩm). Bỏ qua người gác cửa là lý do phổ biến nhất khiến chào hàng chết giữa đường.
-2. **Với dệt may, địa lý quan trọng hơn chức danh.** Quyết định chọn nhà cung cấp nằm ở văn phòng mua hàng / buying agent tại châu Á, không phải trụ sở brand ở Mỹ–EU.
-3. **Route trước, người sau.** Chuỗi bán lẻ có vendor portal, nhà máy có trang "Become a supplier", brand có chương trình đăng ký nhà cung cấp. Đăng ký trước rồi mới tìm đúng người phụ trách.
-
-Ghi chú thị trường dùng được ngay khi chào hàng:
-
-- **Mỹ:** nhà nhập khẩu phải có chương trình FSVP cho từng nhà cung cấp nước ngoài — hỏi thẳng "ai phụ trách FSVP" vừa xác định đúng người, vừa cho thấy bạn hiểu luật.
-- **EU:** trách nhiệm tuân thủ nằm ở importer, nên QA/Technical của họ là cửa bắt buộc.
-- **Private label:** không gửi catalogue, gửi sample + spec (thành phần, dinh dưỡng, shelf-life, chứng nhận, giá landed).
-
-Nguồn dữ liệu để máy xếp hạng: `src/lib/target-roles.ts` (nguồn duy nhất) — ranker, UI và connector đều đọc từ đó.
