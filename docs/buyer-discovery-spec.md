@@ -345,3 +345,52 @@ Kiểm chứng: `npm run export:test` — 43 check, gồm đọc lại CSV bằn
 | Năm thành lập, quy mô nhân sự, địa chỉ | **mới chỉ có trong dữ liệu demo**; connector chưa trích và view thật chưa map — cần làm |
 
 **Giới hạn kỹ thuật đang áp:** chỉ trang công khai · tôn trọng `robots.txt` · chỉ cùng domain · không đăng nhập, không tài khoản giả, không giải CAPTCHA · chặn SSRF trước khi kết nối · mọi giá trị phải xuất hiện nguyên văn trên trang.
+
+---
+
+## 14. Các lớp nguồn, và AI làm gì trong dự án này
+
+### 14.1 "Tự vào tự tìm" được đến đâu
+
+Công bằng mà nói: phần **dễ** thì người dùng tự làm được, và họ nói đúng. Website, số tổng đài, email chung của một công ty lớn — 5 phút Google là ra. Nếu sản phẩm chỉ dừng ở đó thì không có lý do tồn tại.
+
+Phần người dùng **không** tự làm được:
+
+- **Đọc chéo ngôn ngữ và ngữ cảnh**: biết trang "Supplier Requirements" của một nhà nhập khẩu Mỹ nói gì, biết hội chợ nào mới là hội chợ ngành, biết sổ đăng ký nào của bang nào có officers.
+- **Tìm *ai đang mua*** chứ không phải *ai có website*: đó là dữ liệu vận tải/hải quan, không nằm trên Google.
+- **Đi đúng cửa**: vendor registration / supplier portal / RFQ — thường không phải email của giám đốc mua hàng mà là một form mà nhà cung cấp Việt không biết đường tới.
+- **Làm đủ nhiều công ty, và làm lại**: 30 buyer, mỗi tháng kiểm lại người đổi chức, kênh đổi, có lô hàng mới. Người tự tìm được 3 công ty rồi dừng.
+
+### 14.2 Các lớp nguồn — cái gì thêm được gì
+
+| Lớp | Cho thêm | Chi phí | Trạng thái |
+| --- | --- | --- | --- |
+| **Trang công khai của chính công ty** | email, điện thoại, LinkedIn, form, tín hiệu | miễn phí | **đang chạy** |
+| **Nhiều nguồn công khai hơn**: press release, PDF/báo cáo thường niên, danh bạ hội chợ, hiệp hội ngành, tin tức | người (CEO, giám đốc mua hàng), ngày, mặt hàng, nhà máy | miễn phí (tốn công đọc) | chưa cắm |
+| **Sổ đăng ký nhà nước**: UK Companies House (API free, có officers/PSC, OGL cho phép dùng thương mại), SEC EDGAR (công ty đại chúng) | officers **chính thống**, không phải scrape | miễn phí | chưa cắm |
+| **Dữ liệu vận tải/hải quan**: US CBP manifest qua ImportYeti / Volza / Panjiva / ImportGenius | **ai đang mua mặt hàng này, từ ai, khối lượng, tần suất** — đây mới là tín hiệu người mua thật | ImportYeti có bản free giới hạn; Volza ~1.500 USD/năm; Panjiva/ImportGenius ~125–1.000+ USD/tháng | chưa cắm (cần API key/ngân sách) |
+| **Nhà cung cấp enrichment** (Apollo, ZoomInfo, Volza contact) | email, số điện thoại cá nhân | trả phí | chưa cắm — dữ liệu là của họ, mình **không kiểm chứng được nguồn gốc**, và nghĩa vụ dữ liệu cá nhân (PDP Law 91/2025, GDPR) vẫn thuộc về mình |
+| **Kiểm tra mailbox** (MillionVerifier, NeverBounce…) | biến "tìm thấy" thành "gửi được": valid / catch-all / invalid | ~2–10 USD/1.000 | chưa cắm — rẻ, nên làm |
+| **Theo dõi thay đổi** | người đổi chức, kênh đổi, hợp đồng mới | hạ tầng | có bảng `report_changes`, chưa chạy định kỳ |
+
+Ba điều **không** đổi dù cắm thêm nguồn nào:
+
+1. Không đăng nhập, không tài khoản giả, không giải CAPTCHA.
+2. Đi tới **nguồn gốc** của dữ liệu (manifest, sổ đăng ký) hoặc mua từ nhà cung cấp — không scrape nền tảng trung gian rồi bán lại.
+3. Mỗi giá trị vẫn phải kèm nguồn; giá trị mua từ bên thứ ba phải ghi rõ là mua, không được trình bày như tự tìm được.
+
+### 14.3 AI làm gì ở đây
+
+Hôm nay AI mới làm phần **nhỏ nhất**, và nên nói thẳng như vậy:
+
+| Việc | Hôm nay | Cần AI làm |
+| --- | --- | --- |
+| Đọc hiểu một trang | rule + ngữ cảnh: chọn email nào là của công ty, số nào là fax, tên nào đi với email nào, loại số của web store | mở rộng khi trang lạ hơn |
+| **Chọn nguồn để đọc** | cố định vài đường dẫn (`/contact`, `/about`, `/suppliers`…) | tự quyết định: công ty thực phẩm Mỹ thì đọc tiếp trang vendor/supplier, PDF annual report, press release, hội chợ nào |
+| **Hợp nhất thực thể** | chưa có | cùng một công ty ở website + sổ đăng ký + dữ liệu hải quan + báo chí → một hồ sơ, không nhân bản, không lẫn công ty trùng tên |
+| **Đọc tài liệu dài** | chưa có | PDF/báo cáo/trang supplier → **checklist giấy tờ nhà cung cấp phải đáp ứng** (món đang nợ) |
+| **Đối chiếu mâu thuẫn** | ghi cả hai, không phán | hai nguồn nói khác nhau → giữ cả hai kèm ngày, biết cái nào mới hơn |
+| **Theo dõi thay đổi** | có bảng `report_changes` | đọc lại đúng thứ đã đổi, không đọc lại tất cả |
+| **Khớp sản phẩm ↔ người mua** | chưa có | HS code + sản phẩm của nhà cung cấp Việt ↔ mặt hàng buyer đang nhập ↔ nhà máy phù hợp |
+
+**Tóm lại:** giá trị không nằm ở việc đọc một trang web — việc đó ai cũng làm được. Nó nằm ở **đọc nhiều nguồn, hợp nhất thành một hồ sơ đúng, chỉ ra cửa vào đúng, và giữ nó tươi** — cộng thêm lớp dữ liệu mà Google không có (hải quan, sổ đăng ký). Nguồn nào cắm thêm là quyết định về ngân sách và pháp lý, không phải quyết định kỹ thuật.

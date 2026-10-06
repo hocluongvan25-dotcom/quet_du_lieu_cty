@@ -198,6 +198,10 @@ Per person: name, title, department, previous role when published, and **the cha
 
 Not found today: personal mobile numbers (LinkedIn has no phone field; under ~5% of members publish one and usually only to first-degree connections), pattern-inferred emails (a later phase, labelled and never exported directly), anything behind a login wall, and paid trade data. Founded year, headcount and address exist only in the demo fixture — the connector does not extract them yet. The full list lives in `docs/buyer-discovery-spec.md` §13.
 
+### What the AI actually does (and what it must do next)
+
+Reading one company website is not a product — anyone can do that in five minutes. The value is in reading **many** sources, merging them into one correct entity, pointing at the right door and keeping it fresh, plus the layer Google does not have: customs/registry data. `docs/buyer-discovery-spec.md` §14 lays out the source layers (company pages → press/PDF/trade-fair directories → government registries → trade data → enrichment vendors → mailbox verification → monitoring) with cost and legal status for each, and splits the AI's job into what it does today (understanding one page: which email belongs to the company, which number is a fax, which name goes with which address) versus what it must do next (choosing which sources to read, entity resolution across sources, reading long documents into a supplier-requirements checklist, resolving conflicts, and matching a Vietnamese supplier's product/HS code to what a buyer actually imports).
+
 ### Connector: public pages to sourced channels
 
 `src/lib/connector/` turns a domain into contact channels found on public pages. Rules are enforced in code and covered by tests: public pages only (no login, no cookies, no CAPTCHA solving), robots.txt respected, same-domain only, every value carries the page URL and the exact sentence it was found in, and no email is ever generated from a pattern.
