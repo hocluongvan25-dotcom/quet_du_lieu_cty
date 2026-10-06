@@ -590,6 +590,13 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2"><h2 className="truncate text-[20px] font-bold tracking-[-0.04em] text-[#2D3040]">{report.companyName}</h2><StatusPill status={report.status} locale={locale} /></div>
               <p className="mt-1 flex items-center gap-1.5 text-[12px] text-[#7C8290]"><Globe2 size={13} /> {report.country} <span className="text-[#CFD1D8]">•</span> {report.industry}</p>
+              {report.foundedYear || report.headcount || report.address ? (
+                <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#8A90A0]">
+                  {report.foundedYear ? <span>{locale === "vi" ? "Thành lập" : "Founded"} {report.foundedYear}</span> : null}
+                  {report.headcount ? <span>{report.headcount}</span> : null}
+                  {report.address ? <span className="inline-flex items-center gap-1"><Users size={12} /> {report.address}</span> : null}
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -603,7 +610,7 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
             <div className="mt-3 flex flex-wrap gap-1.5">{report.signals.map((signal) => <span key={signal} className="rounded-full bg-[#F4F5F8] px-2 py-1 text-[10px] font-semibold text-[#6C7280]">{signal}</span>)}</div>
           </div>
 
-          {report.people && report.people.length > 0 ? <PeoplePanel locale={locale} people={report.people} onCopy={onCopy} /> : null}
+          {report.people && report.people.length > 0 ? <PeoplePanel locale={locale} people={report.people} offer={report.sellerOffer} onCopy={onCopy} /> : null}
 
           <div className="mt-6 flex items-center justify-between"><div><h3 className="text-[14px] font-bold text-[#333747]">{t.drawer.channels}</h3><p className="mt-1 text-[11px] text-[#8A90A0]">{t.drawer.channelsText}</p></div><span className="text-[11px] font-semibold text-[#6D63E8]">{report.contacts.length} fields</span></div>
           <div className="mt-3 space-y-2">

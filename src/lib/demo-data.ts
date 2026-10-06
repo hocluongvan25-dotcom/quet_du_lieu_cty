@@ -82,10 +82,20 @@ export type CompanyReport = {
   industry: string;
   description: string;
   website?: string;
+  /** Company facts the agreed output format calls for. */
+  foundedYear?: number;
+  headcount?: string;
+  address?: string;
   lastUpdated: string;
   contacts: Contact[];
   sources: Source[];
   signals: string[];
+  /**
+   * What the seller is offering. The same company has different "right people"
+   * depending on this: a raw-material supplier needs Procurement, a finished-goods
+   * or private-label seller needs whoever owns the channel and the range.
+   */
+  sellerOffer?: "ingredients" | "packaging" | "finished_product";
   /** Decision makers / department routes, ranked for this search. */
   people?: DecisionMaker[];
   /** Not-found and excluded findings, so absence is visible instead of invented. */

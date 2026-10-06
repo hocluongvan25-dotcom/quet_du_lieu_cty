@@ -168,3 +168,29 @@ Lý do không chỉ là pháp lý: email sai làm hỏng reputation tên miền 
 | Refresh (chỉ tính khi có thay đổi) | 2–4 |
 
 Chỉ tính credit khi có kết quả mới; job lỗi phải hoàn credit (schema đã có `refund`).
+
+---
+
+## 9. Định dạng output chuẩn (đã chốt 06/10/2026)
+
+Mọi report trả cho khách phải có đủ 5 khối, theo thứ tự này. Đây là hợp đồng với người dùng, không phải gợi ý trình bày.
+
+**1. Khối công ty** — tên, website, LinkedIn, ngành, **năm thành lập, quy mô nhân sự, địa chỉ**, mô tả 1–2 câu, và **xếp hạng cho use case nào** (`sellerOffer`: nguyên liệu thô / bao bì / hàng thành phẩm–private label). Thiếu dòng use case thì thứ tự đầu mối vô nghĩa, vì cùng một công ty có "người đúng" khác nhau tuỳ bạn bán gì.
+
+**2. Khối đầu mối** — xếp hạng, mỗi người có: tên, chức danh, bộ phận, **"Vì sao"** (chào gì, cho ai), **cảnh báo** nếu có (đã đổi vai trò · là sales không phải người mua · hồ sơ mỏng), nguồn + ngày thấy lần cuối, và kênh liên hệ kèm nhãn.
+
+**3. Khối kênh công ty** — điện thoại, email chung, email bộ phận, email công bố theo vùng. Mỗi dòng: giá trị, nguồn (URL), `certainty`, `identity_match`, và **được phép làm gì** (`policy`).
+
+**4. Khối "Không tìm thấy & đã loại trừ"** — bắt buộc, không được bỏ trống cho tiện. Ghi rõ thứ không tìm được và **tại sao**, và loại những giá trị trông giống nhưng không phải (ví dụ số điện thoại của đơn vị vận hành web store).
+
+**5. Khối nguồn** — danh sách URL đã đối chiếu, kèm ngày.
+
+Quy tắc bắt buộc:
+
+- Không giá trị nào được xuất hiện mà thiếu nguồn hoặc thiếu nhãn tin cậy.
+- Thiếu thì ghi là thiếu. Không suy diễn, không sinh email theo pattern ở tầng này.
+- Thứ tự đầu mối phải khớp với `sellerOffer` đã nêu ở khối 1.
+- Mỗi kênh chỉ mang một nhãn tin cậy (`Đã thấy công bố` / `Chưa kiểm lại` / `Suy luận theo pattern`) và một quyền (`Gửi được` / `Cần kiểm tra mailbox trước khi gửi` / `Liên hệ thủ công` / `Cần bạn xác nhận`).
+- Khối 4 là chỗ thể hiện sự trung thực của sản phẩm: một report không có mục "không tìm thấy" là report chưa tìm kỹ.
+
+Ví dụ chuẩn đang chạy: `src/lib/demo-mariani.ts` (Mariani Packing, đối chiếu 06/10/2026) — gõ `Mariani` trong demo để mở.

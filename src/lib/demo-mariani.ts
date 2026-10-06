@@ -31,6 +31,9 @@ export const marianiReport: CompanyReport = {
   description:
     "Nhà sản xuất trái cây sấy lớn nhất thế giới thuộc sở hữu gia đình, thành lập 1906, trụ sở Vacaville, California. Nguyên liệu trái cây sấy của Mariani được dùng bởi nhiều thương hiệu thực phẩm lớn, và công ty có bộ phận mua nguyên liệu riêng (Bulk & Ingredients).",
   website: "mariani.com",
+  foundedYear: 1906,
+  headcount: "201–500 nhân sự (LinkedIn)",
+  address: "500 Crocker Drive, Vacaville, CA 95688, USA",
   lastUpdated: "14:05 hôm nay",
   contacts: [
     {
@@ -137,6 +140,7 @@ export const marianiReport: CompanyReport = {
       kind: "social",
     },
   ],
+  sellerOffer: "finished_product",
   signals: [
     "Website xác minh",
     "Có bộ phận mua nguyên liệu riêng",
@@ -145,13 +149,36 @@ export const marianiReport: CompanyReport = {
   ],
   people: [
     {
+      id: "person-joe-flannigan",
+      name: "Joe Flannigan",
+      title: "VP Key Corporate Accounts",
+      department: "Sales & Marketing",
+      rank: 1,
+      relevance:
+        "Xếp hạng cho hàng thành phẩm / private label: phụ trách các kênh Club, Mass Merchandiser và Drug — người quyết định sản phẩm của bạn có vào được hệ thống bán lẻ của Mariani hay không, và là đầu mối cho một thoả thuận phân phối hoặc đồng thương hiệu.",
+      identityMatch: "person",
+      certainty: "probable",
+      sourceLabel: "Hồ sơ LinkedIn công khai",
+      sourceUrl: "https://www.linkedin.com/in/joe-flannigan-b24616b",
+      lastSeenAt: "06/10/2026",
+      caution: "Đây là đầu mối BÁN của Mariani, không phải người mua nguyên liệu. Nếu bạn chào nguyên liệu thô thì đừng bắt đầu ở đây.",
+      channels: [
+        {
+          type: "linkedin",
+          value: "linkedin.com/in/joe-flannigan-b24616b",
+          certainty: "probable",
+          policy: "manual_contact_only",
+        },
+      ],
+    },
+    {
       id: "person-stacy-nygard",
       name: "Stacy Nygard",
       title: "Director, Procurement",
       department: "Procurement",
-      rank: 1,
+      rank: 2,
       relevance:
-        "Ưu tiên số 1 khi chào nguyên liệu, bao bì hoặc dịch vụ sản xuất: phụ trách strategic sourcing, quản lý nhà cung cấp và có kinh nghiệm mua từ nhiều quốc gia.",
+        "Khi đã có quan hệ cung ứng, đây là người chạy onboarding nhà cung cấp, điều khoản và tiêu chuẩn đầu vào: phụ trách strategic sourcing, quản lý nhà cung cấp và có kinh nghiệm mua từ nhiều quốc gia.",
       identityMatch: "person",
       certainty: "probable",
       sourceLabel: "Hồ sơ LinkedIn công khai",
@@ -172,8 +199,8 @@ export const marianiReport: CompanyReport = {
       name: "Bella Huk",
       title: "Purchasing Manager",
       department: "Purchasing",
-      rank: 2,
-      relevance: "Đầu mối mua hàng trực tiếp, phù hợp khi cần hỏi quy trình nhà cung cấp và tiêu chuẩn đầu vào.",
+      rank: 3,
+      relevance: "Phù hợp ở bước giao dịch: xác nhận quy trình nhà cung cấp, chứng từ và tiêu chuẩn đầu vào.",
       identityMatch: "person",
       certainty: "probable",
       sourceLabel: "Hồ sơ LinkedIn công khai",
@@ -196,9 +223,9 @@ export const marianiReport: CompanyReport = {
       title: "Sales Effectiveness Manager",
       department: "Sales",
       previousRole: "Trước đây: Senior Buyer, Buyer/Planner tại Mariani",
-      rank: 3,
+      rank: 4,
       relevance:
-        "Hiểu quy trình mua, tồn kho, đánh giá nhà cung cấp và tiêu chuẩn FDA — hữu ích để hiểu cách Mariani chọn nhà cung cấp.",
+        "Hiểu quy trình mua, tồn kho, đánh giá nhà cung cấp và tiêu chuẩn FDA — hữu ích để hiểu cách Mariani chọn đối tác.",
       identityMatch: "person",
       certainty: "probable",
       sourceLabel: "Hồ sơ LinkedIn công khai",
@@ -214,31 +241,15 @@ export const marianiReport: CompanyReport = {
         },
       ],
     },
-    {
-      id: "person-joe-flannigan",
-      name: "Joe Flannigan",
-      title: "VP Key Corporate Accounts",
-      department: "Sales & Marketing",
-      rank: 4,
-      relevance:
-        "Chỉ dùng khi chào thành phẩm, private label hoặc hợp tác phân phối — phụ trách các kênh Club, Mass Merchandiser và Drug.",
-      identityMatch: "person",
-      certainty: "probable",
-      sourceLabel: "Hồ sơ LinkedIn công khai",
-      sourceUrl: "https://www.linkedin.com/in/joe-flannigan-b24616b",
-      lastSeenAt: "06/10/2026",
-      caution: "Đây là đầu mối BÁN của Mariani, không phải người mua. Xếp sau nhóm Procurement.",
-      channels: [
-        {
-          type: "linkedin",
-          value: "linkedin.com/in/joe-flannigan-b24616b",
-          certainty: "probable",
-          policy: "manual_contact_only",
-        },
-      ],
-    },
   ],
   notes: [
+    {
+      kind: "not_found",
+      label: "Đầu mối Product Development / Innovation (chưa có tên)",
+      detail:
+        "Với hàng thành phẩm / private label, đây mới là chức danh quyết định sản phẩm có vào danh mục hay không — nhưng chưa nguồn công khai nào nêu tên. Ghi nhận là thiếu, không suy diễn. Bước connector sẽ đọc trang tuyển dụng và LinkedIn công ty để tìm vai trò này.",
+      sourceUrl: "https://mariani.com/pages/experience-meets-innovation",
+    },
     {
       kind: "not_found",
       label: "WhatsApp chính thức",

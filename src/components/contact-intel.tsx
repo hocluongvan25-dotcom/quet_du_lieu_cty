@@ -38,6 +38,13 @@ const POLICY_LABELS: Record<ChannelPolicy, { vi: string; en: string }> = {
   requires_override: { vi: "Cần bạn xác nhận trước", en: "Needs your confirmation" },
 };
 
+/** Ranking is use-case dependent, so the report must say which use case it ranked for. */
+const OFFER_LABELS: Record<"ingredients" | "packaging" | "finished_product", { vi: string; en: string }> = {
+  ingredients: { vi: "Nguyên liệu thô", en: "Raw materials" },
+  packaging: { vi: "Bao bì / vật tư đóng gói", en: "Packaging" },
+  finished_product: { vi: "Hàng thành phẩm / private label", en: "Finished goods / private label" },
+};
+
 const POLICY_TONE: Record<ChannelPolicy, string> = {
   outreach_ready: "bg-[#EAF8F3] text-[#168466]",
   needs_mailbox_check: "bg-[#FFF4E5] text-[#C37B18]",
@@ -63,9 +70,10 @@ function ChannelIcon({ type }: { type: DecisionMaker["channels"][number]["type"]
   return <UserRound size={14} className="text-[#5C70CC]" />;
 }
 
-export function PeoplePanel({ locale, people, onCopy }: { locale: AppLocale; people: DecisionMaker[]; onCopy: (value: string, label: string) => void }) {
+export function PeoplePanel({ locale, people, offer, onCopy }: { locale: AppLocale; people: DecisionMaker[]; offer?: "ingredients" | "packaging" | "finished_product"; onCopy: (value: string, label: string) => void }) {
   const isVietnamese = locale === "vi";
   if (people.length === 0) return null;
+  const offerLabel = offer ? OFFER_LABELS[offer][isVietnamese ? "vi" : "en"] : null;
 
   return (
     <section className="mt-6">
@@ -76,6 +84,14 @@ export function PeoplePanel({ locale, people, onCopy }: { locale: AppLocale; peo
             {isVietnamese
               ? "Người ra quyết định / bộ phận, xếp theo mức liên quan. Nhãn tin cậy đi kèm từng giá trị."
               : "Decision makers and departments, ranked by relevance. Every value carries its confidence label."}
+            {offerLabel ? (
+              <>
+                {" "}
+                <span className="font-semibold text-[#6D63E8]">
+                  {isVietnamese ? "Xếp hạng cho:" : "Ranked for:"} {offerLabel}
+                </span>
+              </>
+            ) : null}
           </p>
         </div>
         <span className="rounded-full bg-[#F0EEFF] px-2 py-1 text-[10px] font-bold text-[#6257E7]">{people.length} {isVietnamese ? "đầu mối" : "contacts"}</span>
