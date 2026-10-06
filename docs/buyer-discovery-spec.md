@@ -294,3 +294,54 @@ Bấm một dòng để xem từng kênh: giá trị, người + chức danh (n�
 - Số dòng bị giữ lại hiển thị ngay trên màn hình (ví dụ "3 kênh bị giữ lại") để file không bị hiểu là thiếu dữ liệu một cách âm thầm.
 
 Kiểm chứng: `npm run export:test` — 43 check, gồm đọc lại CSV bằng parser RFC 4180 để chắc dấu nháy và dấu phẩy sống sót, và kiểm không có cột khuyến nghị.
+
+---
+
+## 13. Hệ thống tìm những gì (trạng thái đang chạy, 06/10/2026)
+
+Đây là danh mục đúng theo những gì pipeline hiện tại trích được, không phải danh sách mong muốn.
+
+**Về công ty** — đọc từ trang công khai của chính công ty và hồ sơ LinkedIn công ty:
+
+| Trường | Ghi chú |
+| --- | --- |
+| Tên công ty, quốc gia, thành phố | dùng để định danh, không suy diễn |
+| Ngành, mô tả 1–2 câu | rút từ nội dung trang |
+| Website chính thức | link công ty tự dùng |
+| LinkedIn công ty | chỉ khi công ty tự liên kết ra |
+| Email kinh doanh công bố | **nguyên văn trên trang**, không sinh theo pattern |
+| Điện thoại văn phòng | tách khỏi fax; fax ghi nhãn riêng và không tính là kênh liên hệ |
+| WhatsApp doanh nghiệp | chỉ khi công ty công bố |
+| Biểu mẫu liên hệ | form trên website — đường vào công ty không cần tên ai |
+| Tín hiệu | ví dụ "có bộ phận mua nguyên liệu riêng" — đọc từ nội dung trang |
+| Confidence, ngày chụp, ngày hết hạn | do hệ thống tính và ghi |
+| Bằng chứng | mỗi giá trị có URL trang đã thấy nó **và câu chữ đã thấy** |
+
+**Về người** — từ hồ sơ LinkedIn công khai và từ các khối liên hệ công bố trên trang công ty:
+
+| Trường | Ghi chú |
+| --- | --- |
+| Tên, chức danh, bộ phận | |
+| Chức danh trước đây | nếu nguồn công bố |
+| Kênh của chính người đó | hồ sơ LinkedIn, email công bố kèm tên, điện thoại nếu công bố ngay cạnh tên |
+| Ngày thấy lần cuối + nguồn | |
+
+**Về kênh liên hệ**: email (chung / bộ phận / theo vùng hoặc cá nhân), điện thoại, fax, LinkedIn (công ty và cá nhân), biểu mẫu, WhatsApp. Mỗi kênh mang theo nguồn, `certainty`, `identity_match` và `policy` trong model — report chỉ hiển thị nội dung, các nhãn nằm ở danh sách buyer và CSV.
+
+**Về nguồn**: danh sách URL đã đối chiếu; mỗi trường chỉ tới trang đã thấy nó.
+
+**Ghi nội bộ, không hiển thị cho người dùng**: thứ không tìm thấy, giá trị bị loại trừ (email/số của bên thứ ba, số của đơn vị vận hành web store, email đuôi tên file ảnh), trang bị chặn (401/403/429), trang bị robots.txt chặn.
+
+### Những gì hệ thống **không** tìm được hôm nay
+
+| Thứ | Vì sao |
+| --- | --- |
+| Số di động cá nhân | LinkedIn không có trường số điện thoại; dưới ~5% thành viên công khai và thường chỉ mở cho kết nối cấp 1. Muốn có phải cắm nguồn trả phí, và phải ghi rõ nguồn |
+| Email suy luận theo pattern | chưa bật ở report; giai đoạn sau, phải có nhãn, hạn 30 ngày, không export trực tiếp |
+| Nội dung sau đăng nhập / login wall / CAPTCHA | không bao giờ vượt |
+| Dữ liệu thương mại trả phí (CBP manifest qua ImportYeti / Volza / Panjiva) | chưa cắm; đây là nguồn trade signal, không phải nguồn contact |
+| Checklist giấy tờ / điều khoản nhà cung cấp phải đáp ứng | chưa làm (đang nợ) |
+| Vai trò nhà sản xuất hay thương lái (`shipper_role`) | chưa làm (đang nợ) |
+| Năm thành lập, quy mô nhân sự, địa chỉ | **mới chỉ có trong dữ liệu demo**; connector chưa trích và view thật chưa map — cần làm |
+
+**Giới hạn kỹ thuật đang áp:** chỉ trang công khai · tôn trọng `robots.txt` · chỉ cùng domain · không đăng nhập, không tài khoản giả, không giải CAPTCHA · chặn SSRF trước khi kết nối · mọi giá trị phải xuất hiện nguyên văn trên trang.

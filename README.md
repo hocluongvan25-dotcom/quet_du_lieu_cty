@@ -190,6 +190,14 @@ npm run export:test   # 43 checks, including re-reading the CSV with an RFC 4180
 npm run report:test   # 19 checks: person channels merge onto the person card, nothing lost or invented
 ```
 
+### What the system finds
+
+Per company: name, country, city, industry, a one-or-two-line description, official website, company LinkedIn, published business email, office phone (fax kept separate and never treated as a contact line), business WhatsApp when published, the contact form, and signals read from the page content — each value carrying the page URL and the exact sentence it was seen in, plus a confidence score and capture/expiry dates.
+
+Per person: name, title, department, previous role when published, and **the channels that belong to that person** — LinkedIn profile, a published email with their name next to it, a phone if one is published beside their name — with last-seen date and source.
+
+Not found today: personal mobile numbers (LinkedIn has no phone field; under ~5% of members publish one and usually only to first-degree connections), pattern-inferred emails (a later phase, labelled and never exported directly), anything behind a login wall, and paid trade data. Founded year, headcount and address exist only in the demo fixture — the connector does not extract them yet. The full list lives in `docs/buyer-discovery-spec.md` §13.
+
 ### Connector: public pages to sourced channels
 
 `src/lib/connector/` turns a domain into contact channels found on public pages. Rules are enforced in code and covered by tests: public pages only (no login, no cookies, no CAPTCHA solving), robots.txt respected, same-domain only, every value carries the page URL and the exact sentence it was found in, and no email is ever generated from a pattern.
