@@ -71,7 +71,7 @@ The app keeps working without `.env.local`; it stays in demo mode.
 ## Connect Supabase
 
 1. Create a Supabase project.
-2. Run `supabase/migrations/001_company_intel_schema.sql` in its SQL editor, or use the Supabase CLI:
+2. Run both files in `supabase/migrations/` in its SQL editor (in order), or use the Supabase CLI:
 
    ```bash
    supabase link --project-ref YOUR_PROJECT_REF
@@ -83,6 +83,14 @@ The app keeps working without `.env.local`; it stays in demo mode.
 5. Create a private Storage bucket named `research-artifacts` for raw permitted HTML/PDF/screenshot artifacts.
 6. Add a scheduled job or Edge Function to delete expired artifacts and evidence based on `expires_at`.
 
+### Verify the migrations
+
+```bash
+npm run db:verify
+```
+
+Runs every file in `supabase/migrations` against an in-process Postgres (PGlite, WebAssembly) with a minimal Supabase shim, then asserts that onboarding is idempotent, that a research job reserves and settles credits atomically, that failed calls write nothing, and that one workspace cannot read another's reports, ledger or evidence. No credentials or network access needed.
+
 ### Verify the connection
 
 ```bash
@@ -93,7 +101,21 @@ The check reads `.env.local` and reports whether the URL and anon key belong to 
 
 > `SUPABASE_SERVICE_ROLE_KEY` bypasses RLS for the entire project. Keep it server-side only: never prefix it with `NEXT_PUBLIC_`, never import it from a client component, and never commit it. `.env*` is gitignored; rotate any key that has been shared in plain text.
 
-> Before enabling live persistence, add Supabase Auth to the frontend and derive `organization_id` only from the authenticated user’s memberships. Never accept an organization ID from an untrusted browser request as authorization.
+### Auth and live persistence
+
+The dashboard runs in demo mode until a visitor signs in; after that it reads and writes real rows:
+
+| Flow | Where | What happens |
+| --- | --- | --- |
+| Sign in / sign up / reset | `/[locale]/login` → `src/components/auth-panel.tsx` | Supabase Auth with email + password and cookie sessions via `@supabase/ssr` |
+| Email confirmation | `/auth/callback` | Exchanges a PKCE code or verifies an email OTP, then returns to the app |
+| Session refresh | `src/proxy.ts` | Renews auth cookies only when a session cookie already exists |
+| First workspace | `bootstrap_workspace()` | Creates the organization, owner membership and a 50-credit starter grant in one transaction |
+| New Company Report | `POST /api/research` → `complete_research_job()` | Reserves credits, writes `research_jobs`, `company_reports` and `source_evidence`, settles the debit in `credit_ledger`, returns the stored report |
+
+`organization_id` is always derived from the signed-in user's membership inside the SQL functions, so a browser request can never choose its own workspace or price. Anonymous visitors keep the safe demo provider, and an unreachable project degrades to demo data with a visible notice instead of a broken page.
+
+Not wired to real data yet: the team member list, change history and credit activity still render sample content.
 
 ## Production research pipeline
 
@@ -135,9 +157,17 @@ Keep source URLs, timestamps, matching reasons and confidence for every material
 
 ```text
 src/app/page.tsx                              # Dashboard entry point
-src/components/intelligence-dashboard.tsx     # Product UI and interactive demo flow
-src/app/api/research/route.ts                 # Safe demo research endpoint
+src/components/intelligence-dashboard.tsx     # Product UI and research flow
+src/app/[locale]/login/page.tsx               # Sign-in / sign-up route
+src/app/auth/callback/route.ts                # Email-link verification endpoint
+src/app/api/research/route.ts                 # Research endpoint (demo or Supabase-backed)
+src/lib/data/workspace.ts                     # Server-side workspace loader
+src/lib/data/report-view.ts                   # Row -> view mapper
 src/lib/demo-data.ts                          # Demo report types and provider
 src/lib/supabase/client.ts                    # Browser-safe Supabase client
+src/lib/supabase/server.ts                    # Cookie-bound server client
+src/lib/supabase/admin.ts                     # Service-role client (server jobs only)
+src/proxy.ts                                  # Session-cookie refresh
 supabase/migrations/001_company_intel_schema.sql
+supabase/migrations/002_workspace_and_research_rpc.sql
 ```

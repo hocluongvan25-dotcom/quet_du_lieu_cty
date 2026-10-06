@@ -2,7 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   AlertCircle,
   Archive,
@@ -42,6 +42,9 @@ import {
 } from "lucide-react";
 import { CompanyReport, Contact, initialReports } from "@/lib/demo-data";
 import { LanguageSwitcher } from "@/components/language-switcher";
+import { SignOutButton } from "@/components/sign-out-button";
+import { WorkspaceNotice } from "@/components/workspace-notice";
+import { DEMO_CREDITS, REPORT_COST, type WorkspaceSnapshot } from "@/lib/data/workspace-types";
 import { getCopy, normalizeLocale, type AppLocale } from "@/lib/i18n";
 
 type SearchMode = "name" | "link";
@@ -147,12 +150,26 @@ function ContactIcon({ type }: { type: Contact["type"] }) {
   return <Globe2 size={17} className={className} />;
 }
 
-export function IntelligenceDashboard() {
+export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnapshot }) {
   const params = useParams<{ locale?: string }>();
   const locale = normalizeLocale(params?.locale);
   const t = getCopy(locale);
   const prefix = `/${locale}`;
-  const [reports, setReports] = useState<CompanyReport[]>(initialReports);
+  const router = useRouter();
+  const isLive = workspace.state === "live" && workspace.account !== null;
+  const account = workspace.account;
+  const displayName = account?.displayName ?? (locale === "vi" ? "bạn" : "there");
+  // The server snapshot is the source of truth; local state only holds what
+  // this session created or spent before the router refresh lands.
+  const [createdReports, setCreatedReports] = useState<CompanyReport[]>([]);
+  const [demoCreditsUsed, setDemoCreditsUsed] = useState(0);
+  const baseReports = isLive ? workspace.reports : initialReports;
+  const baseCredits = account?.credits ?? DEMO_CREDITS;
+  const credits = isLive ? baseCredits : Math.max(0, baseCredits - demoCreditsUsed);
+  const reports = useMemo(() => {
+    const known = new Set(baseReports.map((report) => report.id));
+    return [...createdReports.filter((report) => !known.has(report.id)), ...baseReports];
+  }, [baseReports, createdReports]);
   const [mode, setMode] = useState<SearchMode>("name");
   const [companyName, setCompanyName] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -160,7 +177,6 @@ export function IntelligenceDashboard() {
   const [selectedReport, setSelectedReport] = useState<CompanyReport | null>(null);
   const [isResearching, setIsResearching] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [credits, setCredits] = useState(128);
   const [showWallet, setShowWallet] = useState(false);
   const [toast, setToast] = useState("");
   const [formError, setFormError] = useState("");
@@ -190,7 +206,7 @@ export function IntelligenceDashboard() {
       return;
     }
 
-    if (credits < 5) {
+    if (credits < REPORT_COST) {
       setFormError(t.dashboard.insufficientCredits);
       return;
     }
@@ -207,6 +223,7 @@ export function IntelligenceDashboard() {
           companyName: mode === "name" ? companyName : "",
           sourceUrl: mode === "link" ? sourceUrl : "",
           country: country === "global" ? "" : country,
+          locale,
         }),
       });
 
@@ -216,19 +233,30 @@ export function IntelligenceDashboard() {
       setProgress(68);
 
       const response = await responsePromise;
-      const result = (await response.json()) as { report?: CompanyReport; error?: string; creditsCharged?: number };
+      const result = (await response.json()) as {
+        report?: CompanyReport;
+        error?: string;
+        creditsCharged?: number;
+        creditsRemaining?: number;
+      };
 
       if (!response.ok || !result.report) throw new Error(result.error || "Không thể tạo report lúc này.");
 
       await sleep(450);
       setProgress(91);
       await sleep(350);
-      setReports((current) => [result.report as CompanyReport, ...current]);
-      setCredits((current) => current - (result.creditsCharged || 5));
+      setCreatedReports((current) => [result.report as CompanyReport, ...current]);
       setSelectedReport(result.report);
       setCompanyName("");
       setSourceUrl("");
       notify(t.dashboard.completed);
+      if (isLive) {
+        // Re-read the workspace so credits, report ids and evidence are the
+        // stored rows instead of the optimistic client state.
+        router.refresh();
+      } else {
+        setDemoCreditsUsed((current) => current + (result.creditsCharged ?? REPORT_COST));
+      }
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Đã có lỗi xảy ra. Hãy thử lại.");
     } finally {
@@ -277,12 +305,12 @@ export function IntelligenceDashboard() {
         </div>
 
         <div className="mt-4 flex items-center gap-2.5 rounded-xl px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#DFF4F0] text-[11px] font-bold text-[#218A72]">AN</div>
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#DFF4F0] text-[11px] font-bold text-[#218A72]">{account?.initials ?? "AN"}</div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[12px] font-bold text-[#343747]">Anh Nguyen</p>
-            <p className="truncate text-[10px] text-[#8A90A0]">{t.starter}</p>
+            <p className="truncate text-[12px] font-bold text-[#343747]">{account?.displayName ?? (locale === "vi" ? "Khách demo" : "Demo guest")}</p>
+            <p className="truncate text-[10px] text-[#8A90A0]">{account ? `${account.plan} · ${account.organizationName}` : t.starter}</p>
           </div>
-          <ChevronDown size={15} className="text-[#989DAC]" />
+          <SignOutButton variant="icon" />
         </div>
       </aside>
 
@@ -307,6 +335,7 @@ export function IntelligenceDashboard() {
               <CircleHelp size={15} className="mr-1.5" /> {t.help}
             </button>
             <LanguageSwitcher />
+            <SignOutButton />
             <button type="button" className="relative rounded-xl p-2.5 text-[#656B79] transition hover:bg-[#F3F4F7]" onClick={() => notify("Bạn đang không có thông báo mới.")} aria-label="Thông báo">
               <Bell size={19} />
               <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-[#755EF7] ring-2 ring-white" />
@@ -330,7 +359,7 @@ export function IntelligenceDashboard() {
                     </div>
                     <div className="rounded-lg bg-[#F0EEFF] p-2 text-[#6558E8]"><Sparkles size={16} /></div>
                   </div>
-                  <div className="mt-3 rounded-xl bg-[#F8F9FB] px-3 py-2 text-[11px] leading-4 text-[#777D8D]">{locale === "vi" ? "1 Company Report tiêu chuẩn sử dụng 5 credits." : "One standard Company Report uses 5 credits."}</div>
+                  <div className="mt-3 rounded-xl bg-[#F8F9FB] px-3 py-2 text-[11px] leading-4 text-[#777D8D]">{locale === "vi" ? `1 Company Report tiêu chuẩn sử dụng ${REPORT_COST} credits.` : `One standard Company Report uses ${REPORT_COST} credits.`}</div>
                   <button type="button" onClick={() => { setShowWallet(false); notify(locale === "vi" ? "Trang nạp credits sẽ sớm có mặt." : "Credit top-up will be available soon."); }} className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#5E54E8] px-3 py-2.5 text-[12px] font-bold text-white hover:bg-[#5147D9]">
                     <Plus size={14} /> {locale === "vi" ? "Nạp credits" : "Add credits"}
                   </button>
@@ -341,13 +370,18 @@ export function IntelligenceDashboard() {
         </header>
 
         <div className="mx-auto max-w-[1460px] px-5 py-7 sm:px-7 lg:px-9 lg:py-9">
+          <WorkspaceNotice className="mb-5" />
+
           <section className="mb-7 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <div className="mb-2 flex items-center gap-2">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-[#ECEAFF] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-[#6257E7]">{t.dashboard.eyebrow}</span>
                 <span className="text-[11px] font-medium text-[#8B90A0]">{t.dashboard.dataClear}</span>
+                <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${isLive ? "bg-[#EAF8F3] text-[#168466]" : "bg-[#F1F2F5] text-[#6C7280]"}`}>
+                  {isLive ? t.dashboard.liveData : t.dashboard.demoFallback}
+                </span>
               </div>
-              <h1 className="text-[25px] font-bold tracking-[-0.045em] text-[#252837] sm:text-[30px]">{t.dashboard.greeting}</h1>
+              <h1 className="text-[25px] font-bold tracking-[-0.045em] text-[#252837] sm:text-[30px]">{t.dashboard.greeting.replace("{name}", displayName)}</h1>
               <p className="mt-1.5 text-[13px] text-[#747A8A]">{t.dashboard.subtitle}</p>
             </div>
             <button type="button" onClick={() => notify(locale === "vi" ? "Bạn có thể nhập tên công ty hoặc dán một link ở ô bên dưới." : "Enter a company name or paste a public company link below.")} className="inline-flex w-fit items-center gap-2 text-[12px] font-semibold text-[#5C52E8] hover:text-[#4438D4]">
@@ -451,6 +485,11 @@ export function IntelligenceDashboard() {
                         <td className="border-b border-[#F0F1F4] py-3.5 pr-2 text-right"><button type="button" onClick={() => setSelectedReport(report)} className="rounded-lg p-1.5 text-[#969CAA] hover:bg-[#EEF0F5] hover:text-[#555C6B]" aria-label={`Mở ${report.companyName}`}><MoreHorizontal size={18} /></button></td>
                       </tr>
                     ))}
+                    {reports.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-10 text-center text-[12px] text-[#8B90A0]">{t.dashboard.emptyReports}</td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>

@@ -1,26 +1,23 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+"use client";
+
+import { createBrowserClient } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { getSupabasePublicConfig } from "./config";
+
+let cachedClient: SupabaseClient | null = null;
 
 /**
- * Browser-safe Supabase client.
+ * Browser-safe Supabase client (cookie-based session shared with the server).
  *
- * The dashboard runs in demo mode when environment variables are absent, so the
- * interface remains usable before a Supabase project is connected.
+ * Returns `null` when the project is not configured, so the dashboard keeps
+ * working in demo mode before a Supabase project is connected.
  */
 export function getSupabaseBrowserClient(): SupabaseClient | null {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const config = getSupabasePublicConfig();
+  if (!config) return null;
 
-  if (!url || !anonKey) return null;
-
-  return createClient(url, anonKey, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-    },
-  });
+  cachedClient ??= createBrowserClient(config.url, config.anonKey);
+  return cachedClient;
 }
 
-export const isSupabaseConfigured = Boolean(
-  process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-);
+export const isSupabaseConfigured = Boolean(getSupabasePublicConfig());

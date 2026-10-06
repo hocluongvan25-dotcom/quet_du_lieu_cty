@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import { LocaleDocument } from "@/components/locale-document";
+import { WorkspaceProvider } from "@/components/workspace-provider";
+import { loadWorkspace } from "@/lib/data/workspace";
 import { isAppLocale, locales } from "@/lib/i18n";
 
 export function generateStaticParams() {
@@ -17,5 +19,13 @@ export default async function LocaleLayout({
 
   if (!isAppLocale(locale)) notFound();
 
-  return <><LocaleDocument />{children}</>;
+  // Loaded once per request and shared with every client component below.
+  const workspace = await loadWorkspace(locale);
+
+  return (
+    <WorkspaceProvider value={workspace}>
+      <LocaleDocument />
+      {children}
+    </WorkspaceProvider>
+  );
 }
