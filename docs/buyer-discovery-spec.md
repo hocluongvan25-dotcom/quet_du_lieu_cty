@@ -194,3 +194,31 @@ Quy tắc bắt buộc:
 - Khối 4 là chỗ thể hiện sự trung thực của sản phẩm: một report không có mục "không tìm thấy" là report chưa tìm kỹ.
 
 Ví dụ chuẩn đang chạy: `src/lib/demo-mariani.ts` (Mariani Packing, đối chiếu 06/10/2026) — gõ `Mariani` trong demo để mở.
+
+---
+
+## 10. Vai trò đứng đầu theo ngành (tệp khách hàng: nhà cung cấp & thương mại VN)
+
+Khách hàng của sản phẩm là **nhà cung cấp / công ty thương mại Việt Nam** ở các nhóm nông sản, thực phẩm chế biến, dệt may. Họ cần tiếp cận **người mua ở nước ngoài**. "Người đứng đầu" không theo ngành một cách máy móc, mà theo **ngành × loại người mua**:
+
+| Ngành | Người mua | #1 | #2 (thường là người gác cửa) |
+| --- | --- | --- | --- |
+| Nông sản | Nhà máy / nhà chế biến | Procurement / Sourcing Manager (Commodity Buyer) | QA / Food Safety Manager |
+| Nông sản | Nhà nhập khẩu / phân phối | Buying / Purchasing Manager | QA / Technical Manager |
+| Thực phẩm chế biến | Nhà nhập khẩu / phân phối | Buying / Purchasing Manager | Category / Brand Manager |
+| Thực phẩm chế biến | Chuỗi bán lẻ (private label) | Category Buyer / Own-Brand Buyer | Product Development / Own-Brand Technologist |
+| Dệt may | Brand / chuỗi thời trang | Sourcing / Vendor Manager — **ở văn phòng mua hàng**, không ở trụ sở | QA / Compliance & Audit Manager |
+
+Ba nguyên tắc rút ra, áp dụng cho mọi ngành:
+
+1. **Người chi tiền và người gác cửa là hai người khác nhau.** QA/Compliance không mua nhưng có quyền dừng giao dịch (dư lượng thuốc BVTV ở nông sản, audit nhà máy ở dệt may, nhãn dinh dưỡng ở thực phẩm). Bỏ qua người gác cửa là lý do phổ biến nhất khiến chào hàng chết giữa đường.
+2. **Với dệt may, địa lý quan trọng hơn chức danh.** Quyết định chọn nhà cung cấp nằm ở văn phòng mua hàng / buying agent tại châu Á, không phải trụ sở brand ở Mỹ–EU.
+3. **Route trước, người sau.** Chuỗi bán lẻ có vendor portal, nhà máy có trang "Become a supplier", brand có chương trình đăng ký nhà cung cấp. Đăng ký trước rồi mới tìm đúng người phụ trách.
+
+Ghi chú thị trường dùng được ngay khi chào hàng:
+
+- **Mỹ:** nhà nhập khẩu phải có chương trình FSVP cho từng nhà cung cấp nước ngoài — hỏi thẳng "ai phụ trách FSVP" vừa xác định đúng người, vừa cho thấy bạn hiểu luật.
+- **EU:** trách nhiệm tuân thủ nằm ở importer, nên QA/Technical của họ là cửa bắt buộc.
+- **Private label:** không gửi catalogue, gửi sample + spec (thành phần, dinh dưỡng, shelf-life, chứng nhận, giá landed).
+
+Nguồn dữ liệu để máy xếp hạng: `src/lib/target-roles.ts` (nguồn duy nhất) — ranker, UI và connector đều đọc từ đó.

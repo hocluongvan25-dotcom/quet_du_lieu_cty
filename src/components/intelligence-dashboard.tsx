@@ -45,6 +45,7 @@ import { LanguageSwitcher } from "@/components/language-switcher";
 import { SignOutButton } from "@/components/sign-out-button";
 import { WorkspaceNotice } from "@/components/workspace-notice";
 import { IntelNotesPanel, PeoplePanel, ProvenanceBadge } from "@/components/contact-intel";
+import { TargetRolesPanel } from "@/components/target-roles-panel";
 import { DEMO_CREDITS, REPORT_COST, type WorkspaceSnapshot } from "@/lib/data/workspace-types";
 import { getCopy, normalizeLocale, type AppLocale } from "@/lib/i18n";
 
@@ -508,6 +509,8 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
             </div>
 
             <div className="space-y-5">
+              <TargetRolesPanel locale={locale} />
+
               <section className="rounded-[21px] border border-[#E9E8F5] bg-white p-5 shadow-[0_8px_28px_rgba(31,38,56,0.025)]">
                 <div className="flex items-start justify-between">
                   <div>
