@@ -1,16 +1,36 @@
 "use client";
 
-import { BadgeCheck, Copy, ExternalLink, Mail, Phone, UserRound } from "lucide-react";
+import {
+  BadgeCheck,
+  BriefcaseBusiness,
+  Building2,
+  CircleHelp,
+  Clock,
+  Copy,
+  ExternalLink,
+  Hand,
+  Mail,
+  MailQuestion,
+  Phone,
+  Send,
+  ShieldAlert,
+  UserRound,
+} from "lucide-react";
 
 import type { AppLocale } from "@/lib/i18n";
 import type { Certainty, ChannelPolicy, DecisionMaker, IdentityMatch } from "@/lib/demo-data";
 
 /**
- * What the report shows about people: who they are, their role, and the public
- * channels found for them — each with its source and confidence label.
+ * What the report shows about people and channels: who they are, their role, and
+ * the public channels found for them — each with its source and its labels.
  *
  * The system finds and labels. Deciding whom to contact, and how, is the user's
  * job: nothing here recommends an approach or a priority order.
+ *
+ * Labels render as small icons with the full wording on hover. A row of pills
+ * ("Đã thấy công bố", "Cần kiểm tra mailbox") is wider than the value it labels,
+ * so on the report the icons carry the meaning and the words stay in the
+ * tooltip, in the list view and in the CSV export.
  */
 
 const CERTAINTY_LABELS: Record<Certainty, { vi: string; en: string }> = {
@@ -19,10 +39,10 @@ const CERTAINTY_LABELS: Record<Certainty, { vi: string; en: string }> = {
   inferred: { vi: "Suy luận theo pattern", en: "Pattern-inferred" },
 };
 
-const CERTAINTY_TONE: Record<Certainty, string> = {
-  confirmed: "bg-[#EAF8F3] text-[#168466]",
-  probable: "bg-[#FFF4E5] text-[#C37B18]",
-  inferred: "bg-[#FDECEF] text-[#C2445C]",
+const CERTAINTY_ICONS: Record<Certainty, { Icon: typeof BadgeCheck; tone: string }> = {
+  confirmed: { Icon: BadgeCheck, tone: "text-[#168466]" },
+  probable: { Icon: Clock, tone: "text-[#C37B18]" },
+  inferred: { Icon: CircleHelp, tone: "text-[#C2445C]" },
 };
 
 const IDENTITY_LABELS: Record<IdentityMatch, { vi: string; en: string }> = {
@@ -32,6 +52,13 @@ const IDENTITY_LABELS: Record<IdentityMatch, { vi: string; en: string }> = {
   unknown: { vi: "Chưa rõ ai", en: "Unattributed" },
 };
 
+const IDENTITY_ICONS: Record<IdentityMatch, { Icon: typeof BadgeCheck; tone: string }> = {
+  person: { Icon: UserRound, tone: "text-[#5C70CC]" },
+  department: { Icon: Building2, tone: "text-[#6C7280]" },
+  company_general: { Icon: BriefcaseBusiness, tone: "text-[#6C7280]" },
+  unknown: { Icon: CircleHelp, tone: "text-[#A0A5B1]" },
+};
+
 const POLICY_LABELS: Record<ChannelPolicy, { vi: string; en: string }> = {
   outreach_ready: { vi: "Gửi được", en: "Ready to send" },
   needs_mailbox_check: { vi: "Cần kiểm tra mailbox", en: "Mailbox unchecked" },
@@ -39,21 +66,34 @@ const POLICY_LABELS: Record<ChannelPolicy, { vi: string; en: string }> = {
   requires_override: { vi: "Cần xác nhận trước", en: "Needs confirmation" },
 };
 
-const POLICY_TONE: Record<ChannelPolicy, string> = {
-  outreach_ready: "bg-[#EAF8F3] text-[#168466]",
-  needs_mailbox_check: "bg-[#FFF4E5] text-[#C37B18]",
-  manual_contact_only: "bg-[#EEF2FF] text-[#4E5FC4]",
-  requires_override: "bg-[#FFF4E5] text-[#C37B18]",
+const POLICY_ICONS: Record<ChannelPolicy, { Icon: typeof BadgeCheck; tone: string }> = {
+  outreach_ready: { Icon: Send, tone: "text-[#168466]" },
+  needs_mailbox_check: { Icon: MailQuestion, tone: "text-[#C37B18]" },
+  manual_contact_only: { Icon: Hand, tone: "text-[#4E5FC4]" },
+  requires_override: { Icon: ShieldAlert, tone: "text-[#C37B18]" },
 };
 
-/** Compact provenance badge for a channel: how sure we are, and what may be done with it. */
-export function ProvenanceBadge({ locale, certainty, identityMatch, policy }: { locale: AppLocale; certainty?: Certainty; identityMatch?: IdentityMatch; policy?: ChannelPolicy }) {
-  const isVietnamese = locale === "vi";
+function LabelIcon({ Icon, tone, label, size }: { Icon: typeof BadgeCheck; tone: string; label: string; size: number }) {
   return (
-    <span className="inline-flex shrink-0 flex-wrap items-center gap-1">
-      {certainty ? <span className={`rounded-full px-1.5 py-0.5 text-[8px] font-bold ${CERTAINTY_TONE[certainty]}`}>{CERTAINTY_LABELS[certainty][isVietnamese ? "vi" : "en"]}</span> : null}
-      {identityMatch ? <span className="rounded-full bg-[#F4F5F8] px-1.5 py-0.5 text-[8px] font-semibold text-[#6C7280]">{IDENTITY_LABELS[identityMatch][isVietnamese ? "vi" : "en"]}</span> : null}
-      {policy ? <span className={`rounded-full px-1.5 py-0.5 text-[8px] font-bold ${POLICY_TONE[policy]}`}>{POLICY_LABELS[policy][isVietnamese ? "vi" : "en"]}</span> : null}
+    <span role="img" aria-label={label} title={label} className="inline-flex shrink-0 items-center">
+      <Icon size={size} className={tone} />
+    </span>
+  );
+}
+
+/**
+ * Provenance of one channel: how sure we are it exists, who it belongs to, and
+ * what may be done with it — one icon each, full wording on hover.
+ */
+export function ProvenanceBadge({ locale, certainty, identityMatch, policy, size = 12 }: { locale: AppLocale; certainty?: Certainty; identityMatch?: IdentityMatch; policy?: ChannelPolicy; size?: number }) {
+  const isVietnamese = locale === "vi";
+  const pick = (vi: string, en: string) => (isVietnamese ? vi : en);
+
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1">
+      {certainty ? <LabelIcon Icon={CERTAINTY_ICONS[certainty].Icon} tone={CERTAINTY_ICONS[certainty].tone} label={pick(CERTAINTY_LABELS[certainty].vi, CERTAINTY_LABELS[certainty].en)} size={size} /> : null}
+      {identityMatch ? <LabelIcon Icon={IDENTITY_ICONS[identityMatch].Icon} tone={IDENTITY_ICONS[identityMatch].tone} label={pick(IDENTITY_LABELS[identityMatch].vi, IDENTITY_LABELS[identityMatch].en)} size={size} /> : null}
+      {policy ? <LabelIcon Icon={POLICY_ICONS[policy].Icon} tone={POLICY_ICONS[policy].tone} label={pick(POLICY_LABELS[policy].vi, POLICY_LABELS[policy].en)} size={size} /> : null}
     </span>
   );
 }
@@ -82,11 +122,10 @@ export function PeoplePanel({ locale, people, onCopy }: { locale: AppLocale; peo
 
       <div className="mt-3 space-y-2">
         {people.map((person) => (
-          <article key={person.id} className="rounded-xl border border-[#E9EBF0] bg-white p-3.5">
+          <article key={person.id} className="min-w-0 rounded-xl border border-[#E9EBF0] bg-white p-3.5">
             <div className="flex flex-wrap items-center gap-2">
               <h4 className="text-[13px] font-bold text-[#333747]">{person.name}</h4>
-              <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${CERTAINTY_TONE[person.certainty]}`}>{CERTAINTY_LABELS[person.certainty][isVietnamese ? "vi" : "en"]}</span>
-              <span className="rounded-full bg-[#F4F5F8] px-2 py-0.5 text-[9px] font-semibold text-[#6C7280]">{IDENTITY_LABELS[person.identityMatch][isVietnamese ? "vi" : "en"]}</span>
+              <ProvenanceBadge locale={locale} certainty={person.certainty} identityMatch={person.identityMatch} size={13} />
             </div>
             <p className="mt-0.5 text-[11px] font-semibold text-[#5D6371]">{person.title}</p>
             <p className="mt-0.5 text-[10px] text-[#8A90A0]">{person.department}</p>
@@ -99,7 +138,7 @@ export function PeoplePanel({ locale, people, onCopy }: { locale: AppLocale; peo
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[11px] font-bold text-[#3B3F4F]">{channel.value}</p>
                   </div>
-                  <span className={`hidden shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold sm:inline ${POLICY_TONE[channel.policy]}`}>{POLICY_LABELS[channel.policy][isVietnamese ? "vi" : "en"]}</span>
+                  <ProvenanceBadge locale={locale} policy={channel.policy} />
                   <button
                     type="button"
                     onClick={() => onCopy(channel.value, person.name)}

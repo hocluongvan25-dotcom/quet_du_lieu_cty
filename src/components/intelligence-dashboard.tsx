@@ -582,24 +582,48 @@ function ChannelChip({ contact, locale, onCopy, showLabel = false }: { contact: 
   const canCopy = contact.value !== "Chưa xác minh" && contact.value !== "Not verified";
   const showIdentity = contact.identityMatch && contact.identityMatch !== "company_general" ? contact.identityMatch : undefined;
   const provenance = [contact.label, contact.via, contact.source, contact.sourceUrl].filter(Boolean).join(" · ");
+  const value = contact.sourceUrl ? (
+    <a href={contact.sourceUrl} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-[11px] font-bold text-[#3B3F4F] hover:text-[#5D53E8]" title={provenance}>
+      {contact.value}
+    </a>
+  ) : (
+    <span className="min-w-0 flex-1 truncate text-[11px] font-bold text-[#3B3F4F]">{contact.value}</span>
+  );
+  const state = <ProvenanceBadge locale={locale} certainty={contact.certainty} identityMatch={showIdentity} policy={contact.policy} />;
+  const mark = (
+    <span className="shrink-0" role="img" aria-label={contact.verified ? t.drawer.verifiedLabel : t.drawer.unverifiedLabel} title={contact.verified ? t.drawer.verifiedLabel : t.drawer.unverifiedLabel}>
+      {contact.verified ? <CircleCheckBig size={11} className="text-[#209170]" /> : <AlertCircle size={11} className="text-[#A0A5B1]" />}
+    </span>
+  );
+  const copy = (
+    <button type="button" disabled={!canCopy} onClick={() => onCopy(contact.value, contact.label)} title={t.common.copy} aria-label={`${t.common.copy} ${contact.label}`} className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[#6257E7] transition hover:bg-[#F2F0FF] disabled:cursor-not-allowed disabled:opacity-35"><Copy size={11} /></button>
+  );
+
+  if (!showLabel) {
+    return (
+      <li className="flex min-w-0 items-center gap-1.5 rounded-lg border border-[#E9EBF0] bg-white py-1 pl-2 pr-1" title={provenance}>
+        <ContactIcon type={contact.type} size={12} />
+        {value}
+        {state}
+        {mark}
+        {copy}
+      </li>
+    );
+  }
 
   return (
-    <li className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-[#E9EBF0] bg-white py-1 pl-2 pr-1" title={provenance}>
-      <ContactIcon type={contact.type} size={12} />
-      {showLabel ? <span className="max-w-[130px] truncate text-[10px] font-semibold text-[#9297A4]" title={contact.label}>{contact.label}</span> : null}
-      {contact.sourceUrl ? (
-        <a href={contact.sourceUrl} target="_blank" rel="noreferrer" className="max-w-[190px] truncate text-[11px] font-bold text-[#3B3F4F] hover:text-[#5D53E8]" title={provenance}>
-          {contact.value}
-        </a>
-      ) : (
-        <span className="max-w-[190px] truncate text-[11px] font-bold text-[#3B3F4F]">{contact.value}</span>
-      )}
-      {showLabel && contact.via ? <span className="max-w-[130px] truncate text-[9px] text-[#A1A5B1]" title={contact.via}>· {contact.via}</span> : null}
-      <ProvenanceBadge locale={locale} certainty={contact.certainty} identityMatch={showIdentity} policy={contact.policy} />
-      <span className="shrink-0" role="img" aria-label={contact.verified ? t.drawer.verifiedLabel : t.drawer.unverifiedLabel} title={contact.verified ? t.drawer.verifiedLabel : t.drawer.unverifiedLabel}>
-        {contact.verified ? <CircleCheckBig size={11} className="text-[#209170]" /> : <AlertCircle size={11} className="text-[#A0A5B1]" />}
-      </span>
-      <button type="button" disabled={!canCopy} onClick={() => onCopy(contact.value, contact.label)} title={t.common.copy} aria-label={`${t.common.copy} ${contact.label}`} className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[#6257E7] transition hover:bg-[#F2F0FF] disabled:cursor-not-allowed disabled:opacity-35"><Copy size={11} /></button>
+    <li className="min-w-0 rounded-lg border border-[#E9EBF0] bg-white px-2 py-1.5" title={provenance}>
+      <div className="flex items-center gap-1.5">
+        <ContactIcon type={contact.type} size={12} />
+        <span className="min-w-0 flex-1 truncate text-[10px] font-semibold text-[#9297A4]" title={contact.label}>{contact.label}</span>
+        {state}
+        {mark}
+        {copy}
+      </div>
+      <div className="mt-0.5 flex items-center gap-1.5 pl-[18px]">
+        {value}
+        {contact.via ? <span className="min-w-0 truncate text-[9px] text-[#A1A5B1]" title={contact.via}>· {contact.via}</span> : null}
+      </div>
     </li>
   );
 }
@@ -636,7 +660,7 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
                 {report.address ? <><span className="text-[#CFD1D8]">•</span><span className="inline-flex items-center gap-1"><Users size={12} /> {report.address}</span></> : null}
               </p>
               {topChannels.length > 0 ? (
-                <ul className="mt-2.5 flex flex-wrap gap-1.5">
+                <ul className="mt-2.5 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                   {topChannels.map((contact) => (
                     <ChannelChip key={`${contact.label}-${contact.value}`} contact={contact} locale={locale} onCopy={onCopy} />
                   ))}
@@ -666,7 +690,7 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
                 </div>
                 <span className="rounded-full bg-[#F4F5F8] px-2 py-0.5 text-[10px] font-bold text-[#6C7280]">{detailChannels.length}</span>
               </div>
-              <ul className="mt-2.5 flex flex-wrap gap-1.5">
+              <ul className="mt-2.5 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                 {detailChannels.map((contact) => (
                   <ChannelChip key={`${contact.label}-${contact.value}`} contact={contact} locale={locale} onCopy={onCopy} showLabel />
                 ))}
