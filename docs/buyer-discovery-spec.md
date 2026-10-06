@@ -196,3 +196,24 @@ Quy tắc bắt buộc:
 Ví dụ chuẩn đang chạy: `src/lib/demo-mariani.ts` (Mariani Packing, đối chiếu 06/10/2026) — gõ `Mariani` trong demo để mở.
 
 ---
+
+---
+
+## 11. Nguyên tắc: chỉ dữ liệu, không lời khuyên
+
+Nền tảng **tìm thông tin và ghi nguồn**. Nó không đưa ra cẩm nang bán hàng, không xếp hạng nên gặp ai, không hướng dẫn cách tiếp cận.
+
+Phép thử một dòng, dùng cho mọi trường được thêm vào report:
+
+> **Trường này trả lời được câu "giá trị đó thấy ở đâu?" không?**
+> Không trả lời được thì không thuộc về report.
+
+Lý do không chỉ là "đúng phạm vi sản phẩm", mà là **niềm tin**:
+
+- Thực tế vận hành thay đổi theo công ty, thị trường và thời điểm. Một cẩm nang soạn sẵn kiểu gì cũng sai ở đâu đó.
+- Khi nền tảng phán sai một lần, người dùng không đánh giá "khối lời khuyên đó sai" — họ kết luận **cả nền tảng là phán bừa**, kể cả phần dữ liệu đúng.
+- Trong report, lời khuyên và dữ liệu trông giống hệt nhau: cùng font, cùng vị trí, cùng vẻ chắc chắn. Người dùng không có cách nào phân biệt. Trộn hai loại là tự làm hỏng giá trị của loại kia.
+
+Thiếu dữ liệu thì người dùng tự đi tìm — không mất gì. Lời khuyên sai thì mất niềm tin, và mất luôn những dữ liệu đúng đi kèm.
+
+Chốt chặn kỹ thuật: `npm run check:content` quét `src/lib` và `src/components`, báo lỗi nếu xuất hiện trường mang tính khuyên bảo (xếp hạng, "vì sao nên gặp", mức ưu tiên, cẩm nang). Ngoài ra TypeScript đã chặn ở tầng kiểu: các trường đó không còn tồn tại trong `CompanyReport`, nên viết lại sẽ lỗi biên dịch ngay.
