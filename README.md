@@ -144,6 +144,8 @@ Not wired to real data yet: the credit activity list on the Billing page still r
 | `contact_verification_events` | Append-only log of each mailbox check (provider, result, raw response, cost) so an address valid in March and dead in June keeps both answers | Audit log |
 | `contact_export_policy` (view) | The single decision layer: `visible_in_app`, `exportable`, `requires_override`, `outreach_eligible`, `blocked_reason` | — |
 
+The report drawer renders that model: business channels carry their confidence and policy badges, decision makers are ranked with the reason to contact each one, and a **not found / excluded** block records what was looked for and absent (so absence is never filled in with a guess). `src/lib/demo-mariani.ts` is a real fixture built from public sources — searching "Mariani" in the demo returns it.
+
 Rules that are enforced by the database rather than by documentation:
 
 - Observation and inference are different tables. A candidate must state its `pattern_used` and `inference_basis`, expires in 30 days, and can only become a channel by being promoted after a verification event.

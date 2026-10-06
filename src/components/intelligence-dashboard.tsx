@@ -44,6 +44,7 @@ import { CompanyReport, Contact, initialReports } from "@/lib/demo-data";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { SignOutButton } from "@/components/sign-out-button";
 import { WorkspaceNotice } from "@/components/workspace-notice";
+import { IntelNotesPanel, PeoplePanel, ProvenanceBadge } from "@/components/contact-intel";
 import { DEMO_CREDITS, REPORT_COST, type WorkspaceSnapshot } from "@/lib/data/workspace-types";
 import { getCopy, normalizeLocale, type AppLocale } from "@/lib/i18n";
 
@@ -92,6 +93,17 @@ function reportSummaryForClipboard(report: CompanyReport, locale: AppLocale) {
     "",
     `${isVietnamese ? "KÊNH KINH DOANH ĐÃ XÁC MINH" : "VERIFIED BUSINESS CHANNELS"}:`,
     ...verifiedContacts.map((contact) => `• ${contact.label}: ${contact.value}`),
+    "",
+    ...(report.people?.length
+      ? [
+          "",
+          `${isVietnamese ? "ĐẦU MỐI LIÊN HỆ" : "CONTACTS"}:`,
+          ...report.people.map(
+            (person) => `• #${person.rank} ${person.name} — ${person.title} · ${person.channels.map((channel) => channel.value).join(", ")}`,
+          ),
+        ]
+      : []),
+    ...(report.notes?.length ? ["", `${isVietnamese ? "GHI CHÚ" : "NOTES"}:`, ...report.notes.map((note) => `• ${note.label}`)] : []),
     "",
     `${isVietnamese ? "NGUỒN" : "SOURCES"}:`,
     ...report.sources.map((source) => `• ${source.label}: ${source.url}`),
@@ -591,6 +603,8 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
             <div className="mt-3 flex flex-wrap gap-1.5">{report.signals.map((signal) => <span key={signal} className="rounded-full bg-[#F4F5F8] px-2 py-1 text-[10px] font-semibold text-[#6C7280]">{signal}</span>)}</div>
           </div>
 
+          {report.people && report.people.length > 0 ? <PeoplePanel locale={locale} people={report.people} onCopy={onCopy} /> : null}
+
           <div className="mt-6 flex items-center justify-between"><div><h3 className="text-[14px] font-bold text-[#333747]">{t.drawer.channels}</h3><p className="mt-1 text-[11px] text-[#8A90A0]">{t.drawer.channelsText}</p></div><span className="text-[11px] font-semibold text-[#6D63E8]">{report.contacts.length} fields</span></div>
           <div className="mt-3 space-y-2">
             {report.contacts.map((contact) => {
@@ -598,12 +612,14 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
               return (
                 <div key={`${contact.label}-${contact.value}`} className="flex items-center gap-3 rounded-xl border border-[#E9EBF0] bg-white px-3.5 py-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#F5F6F9]"><ContactIcon type={contact.type} /></div>
-                  <div className="min-w-0 flex-1"><p className="text-[10px] font-semibold text-[#9297A4]">{contact.label}</p><p className="mt-0.5 truncate text-[12px] font-bold text-[#3B3F4F]">{contact.value}</p></div>
+                  <div className="min-w-0 flex-1"><p className="text-[10px] font-semibold text-[#9297A4]">{contact.label}</p><p className="mt-0.5 truncate text-[12px] font-bold text-[#3B3F4F]">{contact.value}</p>{contact.via ? <p className="mt-0.5 truncate text-[9px] text-[#A1A5B1]">{contact.via}</p> : null}<div className="mt-1"><ProvenanceBadge locale={locale} certainty={contact.certainty} identityMatch={contact.identityMatch} policy={contact.policy} /></div></div>
                   <div className="flex shrink-0 items-center gap-2"><div className="hidden text-right sm:block"><span className={`inline-flex items-center gap-1 text-[10px] font-bold ${contact.verified ? "text-[#209170]" : "text-[#A0A5B1]"}`}>{contact.verified ? <CircleCheckBig size={12} /> : <AlertCircle size={12} />}{contact.verified ? t.drawer.verifiedLabel : t.drawer.unverifiedLabel}</span><p className="mt-1 max-w-[108px] truncate text-[9px] text-[#A1A5B1]">{contact.source}</p></div><button type="button" disabled={!canCopy} onClick={() => onCopy(contact.value, contact.label)} title={t.common.copy} aria-label={`${t.common.copy} ${contact.label}`} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#E3E6EC] text-[#6257E7] transition hover:border-[#D7D1FF] hover:bg-[#F6F4FF] disabled:cursor-not-allowed disabled:opacity-35"><Copy size={15} /></button></div>
                 </div>
               );
             })}
           </div>
+
+          {report.notes && report.notes.length > 0 ? <IntelNotesPanel locale={locale} notes={report.notes} /> : null}
 
           <div className="mt-6 flex items-center justify-between"><div><h3 className="text-[14px] font-bold text-[#333747]">{t.drawer.sources}</h3><p className="mt-1 text-[11px] text-[#8A90A0]">{t.drawer.sourcesText}</p></div><span className="rounded-full bg-[#F0EEFF] px-2 py-1 text-[10px] font-bold text-[#6257E7]">{report.sources.length} sources</span></div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">

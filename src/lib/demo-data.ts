@@ -1,3 +1,5 @@
+import { marianiReport } from "@/lib/demo-mariani";
+
 export type ReportStatus = "ready" | "researching" | "needs_review";
 
 export type Source = {
@@ -7,12 +9,62 @@ export type Source = {
   verified?: boolean;
 };
 
+/** How sure we are that a value is the real one (mirrors `channel_certainty`). */
+export type Certainty = "confirmed" | "probable" | "inferred";
+
+/** Whose address this is (mirrors `identity_match`). Delivery is a separate question. */
+export type IdentityMatch = "person" | "department" | "company_general" | "unknown";
+
+/** Whether a channel may be exported or used for outreach (mirrors `contact_export_policy`). */
+export type ChannelPolicy = "outreach_ready" | "needs_mailbox_check" | "manual_contact_only" | "requires_override";
+
 export type Contact = {
   label: string;
   value: string;
   type: "website" | "email" | "phone" | "linkedin" | "whatsapp";
   verified: boolean;
   source: string;
+  /** Optional provenance fields: present on data that came through the pipeline. */
+  certainty?: Certainty;
+  identityMatch?: IdentityMatch;
+  via?: string;
+  sourceUrl?: string;
+  policy?: ChannelPolicy;
+};
+
+export type PersonChannel = {
+  type: "email" | "phone" | "linkedin";
+  value: string;
+  certainty: Certainty;
+  policy: ChannelPolicy;
+  note?: string;
+};
+
+/** A decision maker or department contact: the thing the seller actually needs. */
+export type DecisionMaker = {
+  id: string;
+  name: string;
+  title: string;
+  department: string;
+  previousRole?: string;
+  /** 1 = most relevant for this search. */
+  rank: number;
+  relevance: string;
+  identityMatch: IdentityMatch;
+  certainty: Certainty;
+  sourceLabel: string;
+  sourceUrl: string;
+  lastSeenAt: string;
+  channels: PersonChannel[];
+  caution?: string;
+};
+
+/** What we looked for and did not find, or found and deliberately excluded. */
+export type IntelNote = {
+  kind: "not_found" | "excluded";
+  label: string;
+  detail: string;
+  sourceUrl?: string;
 };
 
 export type CompanyReport = {
@@ -34,9 +86,13 @@ export type CompanyReport = {
   contacts: Contact[];
   sources: Source[];
   signals: string[];
+  /** Decision makers / department routes, ranked for this search. */
+  people?: DecisionMaker[];
+  /** Not-found and excluded findings, so absence is visible instead of invented. */
+  notes?: IntelNote[];
 };
 
-export const initialReports: CompanyReport[] = [
+export const initialReports: CompanyReport[] = [marianiReport, 
   {
     id: "report-nova",
     companyName: "Nova Distribution Ltd.",
@@ -227,11 +283,29 @@ function toSlug(value: string) {
     .replace(/(^-|-$)/g, "");
 }
 
+/**
+ * Companies we have already researched from public sources. When someone
+ * searches one of these, the demo returns the real report — with sources,
+ * confidence labels and the not-found notes — instead of synthetic data.
+ */
+const KNOWN_FIXTURES: { match: RegExp; report: CompanyReport }[] = [
+  { match: /mariani|mariani\.com/i, report: marianiReport },
+];
+
 export function createDemoReport(input: {
   companyName?: string;
   sourceUrl?: string;
   country?: string;
 }): CompanyReport {
+  const probe = `${input.companyName ?? ""} ${input.sourceUrl ?? ""}`;
+  const known = KNOWN_FIXTURES.find((fixture) => fixture.match.test(probe));
+
+  if (known) {
+    const now = new Date();
+    const stamped = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+    return { ...known.report, id: `report-${Date.now()}`, createdAt: `Hôm nay, ${stamped}`, lastUpdated: `${stamped} hôm nay` };
+  }
+
   const fromUrl = input.sourceUrl
     ?.replace(/^https?:\/\//, "")
     .replace(/^www\./, "")
