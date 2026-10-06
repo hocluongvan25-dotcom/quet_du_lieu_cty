@@ -572,12 +572,17 @@ function channelHref(contact: Contact): string | null {
   return contact.value.includes(".") ? `https://${contact.value}` : null;
 }
 
-/** The value as plain content: a link when there is somewhere to go, text when not. */
+/**
+ * The value as plain content: a link when there is somewhere to go, text when not.
+ * A link carries the link colour at rest — the user should not have to hover to
+ * find out what is clickable — and a phone number stays dark because it is not one.
+ * Callers pass size and layout classes only, never colour.
+ */
 function ChannelValue({ contact, className = "" }: { contact: Contact; className?: string }) {
   const href = channelHref(contact);
-  if (!href) return <span className={`${className} truncate`}>{contact.value}</span>;
+  if (!href) return <span className={`${className} truncate font-bold text-[#3B3F4F]`}>{contact.value}</span>;
   return (
-    <a href={href} target="_blank" rel="noreferrer" title={contact.source} className={`${className} truncate hover:text-[#5D53E8] hover:underline`}>
+    <a href={href} target="_blank" rel="noreferrer" title={contact.source} className={`${className} truncate font-bold text-[#5D53E8] hover:text-[#4335CB] hover:underline`}>
       {contact.value}
     </a>
   );
@@ -638,7 +643,7 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
                   {topChannels.map((contact) => (
                     <li key={`${contact.label}-${contact.value}`} className="flex min-w-0 items-center gap-1.5" title={contact.label}>
                       <ContactIcon type={contact.type} />
-                      <ChannelValue contact={contact} className="min-w-0 flex-1 text-[11px] font-bold text-[#3B3F4F]" />
+                      <ChannelValue contact={contact} className="min-w-0 flex-1 text-[11px]" />
                       <CopyButton value={contact.value} label={contact.label} title={t.common.copy} onCopy={onCopy} />
                     </li>
                   ))}
@@ -676,7 +681,7 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
                       <CopyButton value={contact.value} label={contact.label} title={t.common.copy} onCopy={onCopy} />
                     </div>
                     <div className="mt-1 flex items-center gap-2 pl-[22px]">
-                      <ChannelValue contact={contact} className="min-w-0 flex-1 text-[11px] font-bold text-[#3B3F4F]" />
+                      <ChannelValue contact={contact} className="min-w-0 flex-1 text-[11px]" />
                     </div>
                     {contact.via ? <p className="mt-0.5 pl-[22px] text-[10px] text-[#8A90A0]">{contact.via}</p> : null}
                   </article>
@@ -692,13 +697,13 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
               <div key={source.url} className="group rounded-xl border border-[#E9EBF0] bg-white p-3 transition hover:border-[#D8D3FC] hover:bg-[#FCFBFF]">
                 <a href={source.url} target="_blank" rel="noreferrer" className="block">
                   <div className="flex items-start justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-[#6A7080]">
+                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-[#5D53E8] group-hover:text-[#4335CB] group-hover:underline">
                       {source.kind === "social" ? <BriefcaseBusiness size={13} className="text-[#5C70CC]" /> : source.kind === "news" ? <FileSearch size={13} className="text-[#E89C43]" /> : <Globe2 size={13} className="text-[#6C63E9]" />}
                       {source.label}
                     </span>
                     <ExternalLink size={13} className="text-[#A1A6B2] group-hover:text-[#655BE7]" />
                   </div>
-                  <p className="mt-2 truncate text-[10px] text-[#9095A3]">{source.url.replace(/^https?:\/\//, "")}</p>
+                  <p className="mt-2 truncate text-[10px] font-medium text-[#7C74E8] group-hover:text-[#4335CB] group-hover:underline">{source.url.replace(/^https?:\/\//, "")}</p>
                 </a>
                 <div className="mt-2 flex justify-end">
                   <button type="button" onClick={() => onCopy(source.url, source.label)} title={t.common.copy} aria-label={`${t.common.copy} ${source.label}`} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-bold text-[#6257E7] hover:bg-[#F2F0FF]"><Copy size={12} />{t.common.copy}</button>

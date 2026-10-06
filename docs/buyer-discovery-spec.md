@@ -183,7 +183,7 @@ Mọi report trả cho khách có 4 khối, theo thứ tự này. Đây là hợ
 
 **4. Khối nguồn** — danh sách URL đã đối chiếu, kèm ngày.
 
-**Giao diện report: nội dung, không nhãn trạng thái.** Trong report **không hiển thị các icon thông báo**: nhãn tin cậy (`certainty`), người/bộ phận (`identity_match`), quyền (`policy`), dấu đã xác minh, dòng "nguồn: hồ sơ LinkedIn". Các nhãn đó **vẫn là một phần của model** và vẫn hiển thị đầy đủ ở danh sách buyer và trong file CSV. Các icon còn lại giữ nguyên: icon loại kênh (mail / điện thoại / hồ sơ / website), nút sao chép, icon trang nguồn. Mỗi giá trị là một link tới trang đã thấy nó, và khối nguồn liệt kê lại toàn bộ trang đã kiểm.
+**Giao diện report: nội dung, không nhãn trạng thái.** Trong report **không hiển thị các icon thông báo**: nhãn tin cậy (`certainty`), người/bộ phận (`identity_match`), quyền (`policy`), dấu đã xác minh, dòng "nguồn: hồ sơ LinkedIn". Các nhãn đó **vẫn là một phần của model** và vẫn hiển thị đầy đủ ở danh sách buyer và trong file CSV. Các icon còn lại giữ nguyên: icon loại kênh (mail / điện thoại / hồ sơ / website), nút sao chép, icon trang nguồn. Mỗi giá trị là một link tới trang đã thấy nó và **link phải có màu link ngay từ đầu** (không phải màu chữ thường) để nhìn là biết bấm được; số điện thoại để dạng chữ vì không bấm được. Khối nguồn liệt kê lại toàn bộ trang đã kiểm và cũng tô màu link.
 
 Không hiển thị danh sách "không tìm thấy" cho người dùng. Việc **loại trừ** vẫn phải diễn ra (giá trị của bên thứ ba, số điện thoại của đơn vị vận hành web store, email đuôi tên file ảnh…) nhưng là việc của hệ thống, không phải nội dung để đọc: người dùng cần danh sách đã sạch, không cần biết hệ thống đã bỏ qua những gì.
 

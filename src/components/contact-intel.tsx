@@ -60,7 +60,7 @@ export function PeoplePanel({ locale, people, onCopy }: { locale: AppLocale; peo
                       <ChannelIcon type={channel.type} />
                       <div className="min-w-0 flex-1">
                         {href ? (
-                          <a href={href} target="_blank" rel="noreferrer" className="block truncate text-[11px] font-bold text-[#3B3F4F] hover:text-[#5D53E8] hover:underline">
+                          <a href={href} target="_blank" rel="noreferrer" className="block truncate text-[11px] font-bold text-[#5D53E8] hover:text-[#4335CB] hover:underline">
                             {channel.value}
                           </a>
                         ) : (
