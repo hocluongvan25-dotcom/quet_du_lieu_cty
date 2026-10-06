@@ -65,7 +65,7 @@ export const marianiReport: CompanyReport = {
       certainty: "confirmed",
       identityMatch: "company_general",
       sourceUrl: "https://mariani.com/pages/contact-us",
-      policy: "needs_mailbox_check",
+      policy: "manual_contact_only",
     },
     {
       label: "Email bộ phận nguyên liệu",

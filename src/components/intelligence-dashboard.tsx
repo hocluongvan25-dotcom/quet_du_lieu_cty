@@ -152,13 +152,13 @@ function StatusPill({ status, locale }: { status: CompanyReport["status"]; local
   return <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFF4E5] px-2.5 py-1 text-[11px] font-semibold text-[#C47A16]"><span className="h-1.5 w-1.5 rounded-full bg-[#E49B31]" /> {labels.review}</span>;
 }
 
-function ContactIcon({ type }: { type: Contact["type"] }) {
+function ContactIcon({ type, size = 17 }: { type: Contact["type"]; size?: number }) {
   const className = "text-[#737889]";
-  if (type === "email") return <Mail size={17} className={className} />;
-  if (type === "phone") return <Phone size={17} className={className} />;
-  if (type === "linkedin") return <BriefcaseBusiness size={17} className={className} />;
-  if (type === "whatsapp") return <MessageCircle size={17} className={className} />;
-  return <Globe2 size={17} className={className} />;
+  if (type === "email") return <Mail size={size} className={className} />;
+  if (type === "phone") return <Phone size={size} className={className} />;
+  if (type === "linkedin") return <BriefcaseBusiness size={size} className={className} />;
+  if (type === "whatsapp") return <MessageCircle size={size} className={className} />;
+  return <Globe2 size={size} className={className} />;
 }
 
 export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnapshot }) {
@@ -587,14 +587,42 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
           <div className="flex items-start gap-3.5">
             <Avatar report={report} size="lg" />
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2"><h2 className="truncate text-[20px] font-bold tracking-[-0.04em] text-[#2D3040]">{report.companyName}</h2><StatusPill status={report.status} locale={locale} /></div>
-              <p className="mt-1 flex items-center gap-1.5 text-[12px] text-[#7C8290]"><Globe2 size={13} /> {report.country} <span className="text-[#CFD1D8]">•</span> {report.industry}</p>
-              {report.foundedYear || report.headcount || report.address ? (
-                <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#8A90A0]">
-                  {report.foundedYear ? <span>{locale === "vi" ? "Thành lập" : "Founded"} {report.foundedYear}</span> : null}
-                  {report.headcount ? <span>{report.headcount}</span> : null}
-                  {report.address ? <span className="inline-flex items-center gap-1"><Users size={12} /> {report.address}</span> : null}
-                </p>
+              <h2 className="truncate text-[20px] font-bold tracking-[-0.04em] text-[#2D3040]">{report.companyName}</h2>
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#7C8290]">
+                <span className="inline-flex items-center gap-1"><Globe2 size={12} /> {report.country}</span>
+                <span className="text-[#CFD1D8]">•</span>
+                <span>{report.industry}</span>
+                {report.foundedYear ? <><span className="text-[#CFD1D8]">•</span><span>{locale === "vi" ? "Thành lập" : "Founded"} {report.foundedYear}</span></> : null}
+                {report.headcount ? <><span className="text-[#CFD1D8]">•</span><span>{report.headcount}</span></> : null}
+                {report.address ? <><span className="text-[#CFD1D8]">•</span><span className="inline-flex items-center gap-1"><Users size={12} /> {report.address}</span></> : null}
+              </p>
+              {report.contacts.length > 0 ? (
+                <ul className="mt-2.5 flex flex-wrap gap-1.5">
+                  {report.contacts.map((contact) => {
+                    const canCopy = contact.value !== "Chưa xác minh" && contact.value !== "Not verified";
+                    const showIdentity = contact.identityMatch && contact.identityMatch !== "company_general" ? contact.identityMatch : undefined;
+                    const provenance = [contact.via, contact.source, contact.sourceUrl].filter(Boolean).join(" · ");
+                    return (
+                      <li key={`${contact.label}-${contact.value}`} className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-[#E9EBF0] bg-white py-1 pl-2 pr-1" title={provenance}>
+                        <ContactIcon type={contact.type} size={12} />
+                        <span className="max-w-[130px] truncate text-[10px] font-semibold text-[#9297A4]" title={contact.label}>{contact.label}</span>
+                        {contact.sourceUrl ? (
+                          <a href={contact.sourceUrl} target="_blank" rel="noreferrer" className="max-w-[190px] truncate text-[11px] font-bold text-[#3B3F4F] hover:text-[#5D53E8]" title={provenance}>
+                            {contact.value}
+                          </a>
+                        ) : (
+                          <span className="max-w-[190px] truncate text-[11px] font-bold text-[#3B3F4F]">{contact.value}</span>
+                        )}
+                        {contact.via ? <span className="max-w-[130px] truncate text-[9px] text-[#A1A5B1]" title={contact.via}>· {contact.via}</span> : null}
+                        <ProvenanceBadge locale={locale} certainty={contact.certainty} identityMatch={showIdentity} policy={contact.policy} />
+                        <span className="shrink-0" role="img" aria-label={contact.verified ? t.drawer.verifiedLabel : t.drawer.unverifiedLabel} title={contact.verified ? t.drawer.verifiedLabel : t.drawer.unverifiedLabel}>
+                          {contact.verified ? <CircleCheckBig size={11} className="text-[#209170]" /> : <AlertCircle size={11} className="text-[#A0A5B1]" />}
+                        </span>
+                        <button type="button" disabled={!canCopy} onClick={() => onCopy(contact.value, contact.label)} title={t.common.copy} aria-label={`${t.common.copy} ${contact.label}`} className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[#6257E7] transition hover:bg-[#F2F0FF] disabled:cursor-not-allowed disabled:opacity-35"><Copy size={11} /></button>
+                      </li>
+                    );
+                  })}
+                </ul>
               ) : null}
             </div>
           </div>
@@ -611,19 +639,6 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
 
           {report.people && report.people.length > 0 ? <PeoplePanel locale={locale} people={report.people} onCopy={onCopy} /> : null}
 
-          <div className="mt-6 flex items-center justify-between"><div><h3 className="text-[14px] font-bold text-[#333747]">{t.drawer.channels}</h3><p className="mt-1 text-[11px] text-[#8A90A0]">{t.drawer.channelsText}</p></div><span className="text-[11px] font-semibold text-[#6D63E8]">{report.contacts.length} fields</span></div>
-          <div className="mt-3 space-y-2">
-            {report.contacts.map((contact) => {
-              const canCopy = contact.value !== "Chưa xác minh" && contact.value !== "Not verified";
-              return (
-                <div key={`${contact.label}-${contact.value}`} className="flex items-center gap-3 rounded-xl border border-[#E9EBF0] bg-white px-3.5 py-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#F5F6F9]"><ContactIcon type={contact.type} /></div>
-                  <div className="min-w-0 flex-1"><p className="text-[10px] font-semibold text-[#9297A4]">{contact.label}</p><p className="mt-0.5 truncate text-[12px] font-bold text-[#3B3F4F]">{contact.value}</p>{contact.via ? <p className="mt-0.5 truncate text-[9px] text-[#A1A5B1]">{contact.via}</p> : null}<div className="mt-1"><ProvenanceBadge locale={locale} certainty={contact.certainty} identityMatch={contact.identityMatch} policy={contact.policy} /></div></div>
-                  <div className="flex shrink-0 items-center gap-2"><div className="hidden text-right sm:block"><span className={`inline-flex items-center gap-1 text-[10px] font-bold ${contact.verified ? "text-[#209170]" : "text-[#A0A5B1]"}`}>{contact.verified ? <CircleCheckBig size={12} /> : <AlertCircle size={12} />}{contact.verified ? t.drawer.verifiedLabel : t.drawer.unverifiedLabel}</span><p className="mt-1 max-w-[108px] truncate text-[9px] text-[#A1A5B1]">{contact.source}</p></div><button type="button" disabled={!canCopy} onClick={() => onCopy(contact.value, contact.label)} title={t.common.copy} aria-label={`${t.common.copy} ${contact.label}`} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#E3E6EC] text-[#6257E7] transition hover:border-[#D7D1FF] hover:bg-[#F6F4FF] disabled:cursor-not-allowed disabled:opacity-35"><Copy size={15} /></button></div>
-                </div>
-              );
-            })}
-          </div>
 
           <div className="mt-6 flex items-center justify-between"><div><h3 className="text-[14px] font-bold text-[#333747]">{t.drawer.sources}</h3><p className="mt-1 text-[11px] text-[#8A90A0]">{t.drawer.sourcesText}</p></div><span className="rounded-full bg-[#F0EEFF] px-2 py-1 text-[10px] font-bold text-[#6257E7]">{report.sources.length} sources</span></div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">

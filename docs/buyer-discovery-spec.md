@@ -179,7 +179,7 @@ Mọi report trả cho khách có 4 khối, theo thứ tự này. Đây là hợ
 
 **2. Khối người liên quan** — tên, chức danh, bộ phận, chức danh trước đây nếu có, nguồn + ngày thấy lần cuối, và kênh liên hệ kèm nhãn. **Không xếp hạng, không khuyến nghị nên gặp ai, không hướng dẫn cách tiếp cận.**
 
-**3. Khối kênh công ty** — điện thoại, email chung, email bộ phận, email công bố theo vùng. Mỗi dòng: giá trị, nguồn (URL), `certainty`, `identity_match`, và **được phép làm gì** (`policy`).
+**3. Khối kênh công ty** — điện thoại, email chung, email bộ phận, email công bố theo vùng. Mỗi kênh: giá trị, nguồn (URL), `certainty`, `identity_match`, và **được phép làm gì** (`policy`). Trên giao diện, khối này **nằm ngay trong khối công ty** — một hàng chip nhỏ xuống dòng, không tách thành mục riêng, không mỗi thông tin một dòng; giá trị link thẳng tới trang đã thấy nó.
 
 **4. Khối nguồn** — danh sách URL đã đối chiếu, kèm ngày.
 
