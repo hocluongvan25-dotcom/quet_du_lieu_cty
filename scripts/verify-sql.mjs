@@ -186,7 +186,8 @@ async function expectFailure(sql, params, expected) {
   try {
     await db.query(sql, params);
   } catch (error) {
-    return { message: error.message, ok: error.message.includes(expected) };
+    const wanted = Array.isArray(expected) ? expected : [expected];
+    return { message: error.message, ok: wanted.some((text) => error.message.includes(text)) };
   }
   return { message: "no error raised", ok: false };
 }
@@ -401,13 +402,80 @@ await db.query(
 );
 check("public company channel accepted", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerId])).rows[0].n === 1);
 
-const guessedChannel = await expectFailure(
+// Guessing is allowed, but it must be labelled, short-lived and never claimed as ours.
+const guessSetByCaller = await expectFailure(
   `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, source_url, is_guessed)
    values ($1, $2, 'email', 'dana.whitfield@greatlakespackaging.example', 'company_site', 'https://greatlakespackaging.example/contact', true)`,
   [orgId, buyerId],
+  "non-DEFAULT value",
+);
+check("is_guessed is derived, callers cannot set it", guessSetByCaller.ok, guessSetByCaller.message);
+
+const inferredNoBasis = await expectFailure(
+  `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, certainty, expires_at)
+   values ($1, $2, 'email', 'd.whitfield@greatlakespackaging.example', 'company_site', 'inferred', now() + interval '20 days')`,
+  [orgId, buyerId],
   "violates check constraint",
 );
-check("a pattern-guessed email is structurally impossible", guessedChannel.ok, guessedChannel.message);
+check("an inferred value must state what it was inferred from", inferredNoBasis.ok, inferredNoBasis.message);
+
+const inferredDefaultLife = await expectFailure(
+  `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, certainty, inference_basis)
+   values ($1, $2, 'email', 'd.whitfield@greatlakespackaging.example', 'company_site', 'inferred', 'pattern: first initial + last')`,
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("an inferred value cannot get the default 90-day life", inferredDefaultLife.ok, inferredDefaultLife.message);
+
+const inferredClaimedVerified = await expectFailure(
+  `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, certainty, inference_basis, is_verified, source_url, expires_at)
+   values ($1, $2, 'email', 'd.whitfield@greatlakespackaging.example', 'company_site', 'inferred', 'pattern: first initial + last', true, 'https://x.example', now() + interval '20 days')`,
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("an inferred value can never be marked verified", inferredClaimedVerified.ok, inferredClaimedVerified.message);
+
+const inferredProfileUrl = await expectFailure(
+  `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, certainty, inference_basis, expires_at)
+   values ($1, $2, 'linkedin_url', 'https://www.linkedin.com/in/guess', 'company_site', 'inferred', 'pattern: name', now() + interval '20 days')`,
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("a profile URL can never be inferred, only found", inferredProfileUrl.ok, inferredProfileUrl.message);
+
+const deadButVerified = await expectFailure(
+  `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, source_url, is_verified, deliverability)
+   values ($1, $2, 'email', 'dead@greatlakespackaging.example', 'company_site', 'https://greatlakespackaging.example/contact', true, 'invalid')`,
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("an address known to be dead cannot be marked verified", deadButVerified.ok, deadButVerified.message);
+
+// The legitimate version of a guess: labelled, 20-day life, not claimed as ours.
+const inferredChannelId = (
+  await db.query(
+    `insert into public.contact_channels
+       (organization_id, buyer_profile_id, decision_maker_id, market_source_id, channel_type, value, provenance,
+        certainty, discovered_by, inference_basis, expires_at)
+     values ($1, $2, $3, $4, 'email', 'd.whitfield@greatlakespackaging.example', 'company_site',
+             'inferred', 'inferred_pattern', 'pattern: first initial + last, company domain (mailbox check pending)', now() + interval '20 days')
+     returning id`,
+    [orgId, buyerId, personId, websiteSourceId],
+  )
+).rows[0].id;
+
+const inferredRow = (await db.query("select is_guessed, certainty, deliverability, is_verified from public.contact_channels where id = $1", [inferredChannelId])).rows[0];
+check("an inferred value is stored but flagged as a guess", inferredRow.is_guessed === true && inferredRow.certainty === "inferred" && inferredRow.is_verified === false, JSON.stringify(inferredRow));
+
+// A profile URL that was actually found out in the open is fine.
+const foundProfile = await db.query(
+  `insert into public.contact_channels
+     (organization_id, buyer_profile_id, decision_maker_id, channel_type, value, provenance, certainty, discovered_by, source_url)
+   values ($1, $2, $3, 'linkedin_url', 'https://www.linkedin.com/in/dana-whitfield', 'company_site', 'confirmed', 'web_research_agent', 'https://greatlakespackaging.example/team')
+   returning id`,
+  [orgId, buyerId, personId],
+);
+check("a found profile URL is accepted when the page is cited", Boolean(foundProfile.rows[0].id));
 
 const privateChannel = await expectFailure(
   `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, is_public)
@@ -457,7 +525,7 @@ await db.query("set role authenticated");
 await asUser(userA);
 const visibleBuyers = (await db.query("select count(*)::int as n from public.buyer_profiles")).rows[0].n;
 check("member reads own buyers", visibleBuyers === 2, `saw ${visibleBuyers}`);
-check("member reads own people and channels", (await db.query("select count(*)::int as n from public.decision_makers")).rows[0].n === 2 && (await db.query("select count(*)::int as n from public.contact_channels")).rows[0].n === 2);
+check("member reads own people and channels", (await db.query("select count(*)::int as n from public.decision_makers")).rows[0].n === 2 && (await db.query("select count(*)::int as n from public.contact_channels")).rows[0].n === 4);
 check("member reads the source catalogue", (await db.query("select count(*)::int as n from public.market_sources")).rows[0].n === sourceCount);
 
 const clientWrite = await expectFailure(
@@ -474,6 +542,75 @@ const clientChannelWrite = await expectFailure(
 );
 check("members cannot add contact channels from the client", clientChannelWrite.ok, clientChannelWrite.message);
 
+// --- what may leave the building (export views) -------------------------------
+const rawChannelCount = (await db.query("select count(*)::int as n from public.contact_channels")).rows[0].n;
+const exportable = (await db.query("select value from public.outreach_ready_channels order by value")).rows.map((row) => row.value);
+check("members can see the raw channel list", rawChannelCount === 4, `${rawChannelCount} rows`);
+check("inferred email stays out of the export until it is checked", !exportable.includes("d.whitfield@greatlakespackaging.example"), exportable.join(", "));
+check("expired licensed channel stays out of the export", !exportable.includes("+1 216 555 0143"), exportable.join(", "));
+check(
+  "citable channels are exportable",
+  exportable.includes("procurement@greatlakespackaging.example") && exportable.includes("https://www.linkedin.com/in/dana-whitfield"),
+  exportable.join(", "),
+);
+
+const contactsBefore = (await db.query("select outreach_grade, confidence_label, value from public.outreach_ready_contacts order by value")).rows;
+check(
+  "contacts export carries a grade and a confidence label",
+  contactsBefore.length === 2 && contactsBefore.every((row) => ["a", "b", "c"].includes(row.outreach_grade) && row.confidence_label.length > 0),
+  JSON.stringify(contactsBefore),
+);
+check(
+  "a channel tied to a person grades A",
+  contactsBefore.find((row) => row.value.startsWith("https://www.linkedin.com"))?.outreach_grade === "a",
+  JSON.stringify(contactsBefore),
+);
+
+const summary = (await db.query("select display_name, reachable_channels, verified_channels, named_people, best_grade from public.buyer_outreach_summary")).rows;
+check(
+  "buyer summary lets the list screen rank buyers",
+  summary.length === 2 &&
+    summary.some((row) => row.display_name === "Great Lakes Packaging" && row.reachable_channels === 2 && row.verified_channels === 1 && row.named_people === 1 && row.best_grade === "a"),
+  JSON.stringify(summary),
+);
+
+await asUser(userB);
+check("another tenant sees no exportable channels", (await db.query("select count(*)::int as n from public.outreach_ready_channels")).rows[0].n === 0);
+check("another tenant sees no exportable contacts", (await db.query("select count(*)::int as n from public.outreach_ready_contacts")).rows[0].n === 0);
+check("another tenant sees no buyer summary", (await db.query("select count(*)::int as n from public.buyer_outreach_summary")).rows[0].n === 0);
+await asUser(userA);
+
+const viewWrite = await expectFailure(
+  "insert into public.outreach_ready_contacts (buyer_name, channel_type, value) values ('X', 'email', 'x@y.example')",
+  [],
+  ["cannot insert into view", "permission denied", "not updatable"],
+);
+check("export views are read-only", viewWrite.ok, viewWrite.message);
+
+await db.query("set role anon");
+const anonView = await expectFailure("select count(*) from public.outreach_ready_channels", [], "permission denied");
+check("signed-out visitors cannot read the export views", anonView.ok, anonView.message);
+
+// After a verifier confirms the mailbox exists, the inferred row becomes exportable.
+await db.query("reset role");
+await db.query(
+  "update public.contact_channels set deliverability = 'valid', deliverability_checked_at = now(), verified_by = 'millionverifier' where id = $1",
+  [inferredChannelId],
+);
+await db.query("set role authenticated");
+await asUser(userA);
+const afterCheck = (await db.query("select value, confidence_label from public.outreach_ready_channels where id = $1", [inferredChannelId])).rows[0];
+check("a deliverable inferred email becomes exportable, still labelled inferred", afterCheck?.confidence_label === "inferred", JSON.stringify(afterCheck));
+const gradeRows = (await db.query("select value, outreach_grade from public.outreach_ready_contacts where channel_id = $1", [inferredChannelId])).rows;
+check("that row exports with the right grade", gradeRows.length === 1 && gradeRows[0].outreach_grade === "a", JSON.stringify(gradeRows));
+
+await db.query("reset role");
+await db.query("update public.contact_channels set deliverability = 'invalid', deliverability_checked_at = now() where id = $1", [inferredChannelId]);
+await db.query("set role authenticated");
+await asUser(userA);
+check("once a verifier says the mailbox is dead, it leaves the export", (await db.query("select count(*)::int as n from public.outreach_ready_channels where id = $1", [inferredChannelId])).rows[0].n === 0);
+
+
 await asUser(userB);
 check("other tenant sees no buyers", (await db.query("select count(*)::int as n from public.buyer_profiles")).rows[0].n === 0);
 check("other tenant sees no people", (await db.query("select count(*)::int as n from public.decision_makers")).rows[0].n === 0);
@@ -486,7 +623,11 @@ check("expired channels deleted", purged.deleted_channels === 1, JSON.stringify(
 check("expired people deleted", purged.deleted_decision_makers === 1, JSON.stringify(purged));
 check("orphaned buyer profile deleted", purged.deleted_buyer_profiles === 1, JSON.stringify(purged));
 check("current person kept", (await db.query("select count(*)::int as n from public.decision_makers where id = $1", [personId])).rows[0].n === 1);
-check("current channel kept", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerId])).rows[0].n === 1);
+check(
+  "channels still in date are kept, the expired one is gone",
+  (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerId])).rows[0].n === 3 &&
+    (await db.query("select count(*)::int as n from public.contact_channels where value = '+1 216 555 0143'")).rows[0].n === 0,
+);
 check("buyer with shipments kept", (await db.query("select count(*)::int as n from public.buyer_profiles where id = $1", [buyerId])).rows[0].n === 1);
 check("trade signals untouched by retention", (await db.query("select count(*)::int as n from public.trade_signals")).rows[0].n === 1);
 check("orphan profile is gone", (await db.query("select count(*)::int as n from public.buyer_profiles where id = $1", [orphanBuyerId])).rows[0].n === 0);

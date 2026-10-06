@@ -27,7 +27,8 @@ create type public.market_source_kind as enum (
   'press',               -- press releases, trade press
   'sec_filing',          -- regulatory filings
   'trade_show',          -- exhibitor lists
-  'licensed_contact_db'  -- commercial contact databases
+  'licensed_contact_db', -- commercial contact databases
+  'web_research'         -- our own agent reading public pages
 );
 
 create type public.decision_maker_grade as enum ('a', 'b', 'c');
@@ -51,6 +52,28 @@ create type public.channel_provenance as enum (
   'sec_filing',
   'trade_show',
   'licensed_contact_db'
+);
+
+-- How sure we are that a value is the real one.
+--   confirmed — seen published by the company or an official register (source_url is that page)
+--   probable  — an agent found it in a public mention, or two weak sources agree
+--   inferred  — generated from a naming pattern or supplied without a citable page
+create type public.channel_certainty as enum ('confirmed', 'probable', 'inferred');
+
+-- Whether the mailbox actually exists. Ownership and deliverability are
+-- different questions: a catch-all address can be deliverable and still not
+-- belong to the person we think it does.
+create type public.email_deliverability as enum (
+  'not_checked', 'valid', 'catch_all', 'risky', 'invalid', 'unknown'
+);
+
+create type public.discovered_by as enum (
+  'registry_connector',
+  'trade_connector',
+  'web_research_agent',
+  'licensed_db',
+  'inferred_pattern',
+  'manual'
 );
 
 create table public.market_sources (
@@ -96,7 +119,10 @@ values
   ('company_website', 'Company website', 'company_site', '{}', 'public-record', null, false,
    'Published by the buyer itself.', 'Safest source for channels: leadership pages, contact pages, supplier documents.'),
   ('press_release', 'Press release / trade press', 'press', '{}', 'public-record', null, false,
-   'Announcements naming people and roles.', 'Use for role signals, corroborate before calling it verified.')
+   'Announcements naming people and roles.', 'Use for role signals, corroborate before calling it verified.'),
+  ('seekora_web_research', 'Seekora web research agent', 'web_research', '{}', 'public-record', null, false,
+   'Public pages only: company sites, registers, press, trade shows.',
+   'Rules for the agent: never log in anywhere to read a page, never solve a CAPTCHA, never open a link that requires an account, always keep the URL it read.')
 on conflict (key) do nothing;
 
 -- ---------------------------------------------------------------------------
@@ -206,32 +232,141 @@ create table public.contact_channels (
   channel_type public.channel_type not null,
   value text not null,
   provenance public.channel_provenance not null,
+  certainty public.channel_certainty not null default 'confirmed',
+  discovered_by public.discovered_by not null default 'manual',
+  -- For inferred values: which pattern was used ("first.last", "+1 prefix + main line").
+  inference_basis text,
   source_url text,
   is_public boolean not null default true,
+  -- Ownership: a human or a register tied this value to this person/company.
   is_verified boolean not null default false,
   verification_note text,
   verified_at timestamptz,
-  is_guessed boolean not null default false,
+  -- Deliverability: does the mailbox exist at all (checked by an email verifier).
+  deliverability public.email_deliverability not null default 'not_checked',
+  deliverability_checked_at timestamptz,
+  verified_by text,
+  -- Derived, kept so old queries and dashboards keep working: an inferred value is a guess.
+  is_guessed boolean generated always as (certainty = 'inferred') stored,
   first_seen_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now(),
   expires_at timestamptz not null default (now() + interval '90 days'),
   created_at timestamptz not null default now(),
-  -- Tripwires: these two cannot be flipped without a deliberate schema change.
-  check (is_guessed = false),
+  -- Only published business channels; private and personal ones stay out.
   check (is_public = true),
-  -- Any email must point at where it was actually seen.
-  check (channel_type <> 'email' or nullif(btrim(coalesce(source_url, '')), '') is not null),
+  -- Anything we call "confirmed" must cite the page it was seen on.
+  check (certainty <> 'confirmed' or nullif(btrim(coalesce(source_url, '')), '') is not null),
+  -- An inferred value must say what it was inferred from.
+  check (certainty <> 'inferred' or nullif(btrim(coalesce(inference_basis, '')), '') is not null),
+  -- Inferred values are never marked verified and must be re-checked quickly.
+  check (certainty <> 'inferred' or (is_verified = false and expires_at <= first_seen_at + interval '30 days')),
+  -- Never claim ownership of an address we know does not exist.
+  check (is_verified = false or deliverability <> 'invalid'),
+  check (is_verified = false or nullif(btrim(coalesce(source_url, '')), '') is not null),
+  -- A profile URL is never generated: inventing a handle reaches a stranger.
+  check (channel_type <> 'linkedin_url' or certainty = 'confirmed'),
   -- Values coming from a commercial contact database must name that source.
   check (provenance <> 'licensed_contact_db' or market_source_id is not null),
   check (nullif(btrim(value), '') is not null)
 );
 
 comment on table public.contact_channels is
-  'Public business channels only. is_public and is_guessed are pinned true/false: guessed channels are structurally impossible.';
+  'Public business channels only. Inference is allowed but labelled: inferred rows are never verified, expire in 30 days, and must state what they were inferred from.';
+
+comment on column public.contact_channels.is_guessed is
+  'Generated: true exactly when certainty = inferred. Kept so callers cannot silently treat a guess as a fact.';
+comment on column public.contact_channels.deliverability is
+  'Does the mailbox exist (SMTP-level check). Separate from is_verified, which is about ownership.';
 
 create index contact_channels_buyer_idx on public.contact_channels (buyer_profile_id, channel_type);
 create index contact_channels_person_idx on public.contact_channels (decision_maker_id);
 create index contact_channels_expiry_idx on public.contact_channels (expires_at);
+
+-- ---------------------------------------------------------------------------
+-- Export views. Everything the UI and the CSV button read goes through here, so
+-- "what may leave the building" is defined once, in SQL, instead of in a
+-- scatter of if-statements.
+--
+-- security_invoker = true keeps the caller's RLS on the underlying tables:
+-- these views must never become a way around tenant isolation.
+-- ---------------------------------------------------------------------------
+create view public.outreach_ready_channels
+with (security_invoker = true) as
+select
+  channel.*,
+  case
+    when channel.is_verified then 'verified'
+    else channel.certainty::text
+  end as confidence_label
+from public.contact_channels channel
+where channel.expires_at > now()
+  and channel.deliverability <> 'invalid'
+  and (
+    channel.certainty in ('confirmed', 'probable')
+    or (channel.certainty = 'inferred' and channel.deliverability in ('valid', 'catch_all'))
+  );
+
+comment on view public.outreach_ready_channels is
+  'Channels safe to show and export: not expired, not known-dead, and either citable or (if inferred) at least deliverability-checked.';
+
+create view public.outreach_ready_contacts
+with (security_invoker = true) as
+select
+  buyer.organization_id,
+  buyer.id as buyer_profile_id,
+  buyer.display_name as buyer_name,
+  buyer.country,
+  buyer.website,
+  buyer.fit_score,
+  person.id as decision_maker_id,
+  person.full_name,
+  person.job_title,
+  person.department,
+  channel.id as channel_id,
+  channel.channel_type,
+  channel.value,
+  channel.confidence_label,
+  channel.is_verified,
+  channel.deliverability,
+  channel.source_url,
+  channel.last_seen_at,
+  channel.expires_at,
+  case
+    when channel.decision_maker_id is not null then 'a'   -- a channel of that person or department
+    when person.full_name is not null then 'b'            -- we know who, but only a company line
+    else 'c'                                             -- only a role so far
+  end as outreach_grade
+from public.outreach_ready_channels channel
+join public.buyer_profiles buyer on buyer.id = channel.buyer_profile_id
+left join public.decision_makers person on person.id = channel.decision_maker_id;
+
+comment on view public.outreach_ready_contacts is
+  'One row per usable way to reach a buyer, with its grade and confidence. This is the CSV export.';
+
+create view public.buyer_outreach_summary
+with (security_invoker = true) as
+select
+  buyer.organization_id,
+  buyer.id as buyer_profile_id,
+  buyer.display_name,
+  buyer.country,
+  buyer.region,
+  buyer.website,
+  buyer.industry,
+  buyer.fit_score,
+  buyer.last_signal_at,
+  count(contact.channel_id) as reachable_channels,
+  count(contact.channel_id) filter (where contact.is_verified) as verified_channels,
+  count(distinct contact.full_name) as named_people,
+  min(contact.outreach_grade) as best_grade,
+  max(contact.last_seen_at) as last_contact_seen_at
+from public.buyer_profiles buyer
+left join public.outreach_ready_contacts contact on contact.buyer_profile_id = buyer.id
+group by buyer.organization_id, buyer.id, buyer.display_name, buyer.country, buyer.region,
+         buyer.website, buyer.industry, buyer.fit_score, buyer.last_signal_at;
+
+comment on view public.buyer_outreach_summary is
+  'Buyer list screen: how well each buyer can actually be reached (A/B/C, verified count).';
 
 -- ---------------------------------------------------------------------------
 -- Retention for personal data. Company-level trade rows are left alone.
@@ -312,6 +447,16 @@ revoke insert, update, delete on public.buyer_profiles from anon, authenticated;
 revoke insert, update, delete on public.trade_signals from anon, authenticated;
 revoke insert, update, delete on public.decision_makers from anon, authenticated;
 revoke insert, update, delete on public.contact_channels from anon, authenticated;
+
+grant select on public.outreach_ready_channels to authenticated, service_role;
+grant select on public.outreach_ready_contacts to authenticated, service_role;
+grant select on public.buyer_outreach_summary to authenticated, service_role;
+revoke insert, update, delete on public.outreach_ready_channels from anon, authenticated;
+revoke insert, update, delete on public.outreach_ready_contacts from anon, authenticated;
+revoke insert, update, delete on public.buyer_outreach_summary from anon, authenticated;
+revoke all on public.outreach_ready_channels from anon;
+revoke all on public.outreach_ready_contacts from anon;
+revoke all on public.buyer_outreach_summary from anon;
 
 grant select on public.market_sources to authenticated, service_role;
 grant select on public.buyer_profiles to authenticated, service_role;

@@ -89,7 +89,7 @@ The app keeps working without `.env.local`; it stays in demo mode.
 npm run db:verify
 ```
 
-Runs every file in `supabase/migrations` against an in-process Postgres (PGlite, WebAssembly) with a minimal Supabase shim, then asserts that onboarding is idempotent, that a research job reserves and settles credits atomically, that change detection records one row per moved field, that a first snapshot records nothing, that the retention sweep never orphans an artifact, that rejected calls write nothing, that guessed or non-public contact channels cannot be stored, and that one workspace cannot read another's reports, ledger, evidence, change history or buyer data. No credentials or network access needed.
+Runs every file in `supabase/migrations` against an in-process Postgres (PGlite, WebAssembly) with a minimal Supabase shim, then asserts that onboarding is idempotent, that a research job reserves and settles credits atomically, that change detection records one row per moved field, that a first snapshot records nothing, that the retention sweep never orphans an artifact, that rejected calls write nothing, that inference is labelled and short-lived (never verified), that a dead address cannot be marked verified, that the export views withhold unchecked guesses and respect tenant isolation, and that one workspace cannot read another's reports, ledger, evidence, change history or buyer data. No credentials or network access needed.
 
 ### Verify the connection
 
@@ -138,16 +138,29 @@ Not wired to real data yet: the credit activity list on the Billing page still r
 | `buyer_profiles` | The buyer company, its HS codes, fit score and reasons | Company data |
 | `trade_signals` | One row per shipment record: supplier, HS code, weight, containers, bill-of-lading reference | Company data, no expiry |
 | `decision_makers` | The person or role signal, with grade A (own public channel), B (company channel only) or C (role, no name) | Personal data, `expires_at` |
-| `contact_channels` | Email, phone, form, portal, per-market messaging, each with provenance and verification | Personal data, `expires_at` |
+| `contact_channels` | Email, phone, form, portal, per-market messaging, each with provenance, a confidence label and a mailbox-check status | Personal data, `expires_at` (30 days when inferred) |
 
 Rules that are enforced by the database rather than by documentation:
 
-- `contact_channels.is_guessed` is pinned to `false` — pattern-generated emails cannot be stored.
+- Inference is allowed but labelled: `certainty` is `confirmed` (seen published, with the page it was seen on), `probable`, or `inferred` — and an inferred value must state its `inference_basis`.
+- An `inferred` value is never `is_verified` and expires within 30 days instead of 90; `is_guessed` is generated from `certainty`, so a guess cannot be silently relabelled.
+- A profile URL can never be `inferred`: an invented handle reaches a stranger, so only found URLs are accepted.
+- `deliverability` (does the mailbox exist, checked by an email verifier) is tracked separately from `is_verified` (is it really this person's).
 - `is_public` is pinned to `true` — private or personal channels cannot be stored.
-- An email always needs the `source_url` where it was seen.
+- An address a verifier reports as dead can never be marked verified.
 - A channel from a commercial contact database must name its `market_sources` row, so the customer always sees whose data it is.
 - Grade A/B rows must carry a name; grade C rows must not.
 - `purge_expired_people()` deletes expired people, expired channels and orphaned buyer profiles, while leaving shipment records alone.
+
+What may leave the building is defined in SQL, not scattered through the app. Three views, all `security_invoker = true` so the caller's RLS still applies:
+
+| View | Purpose |
+| --- | --- |
+| `outreach_ready_channels` | Fresh, not known-dead, and either citable or (when inferred) mailbox-checked. Carries `confidence_label` |
+| `outreach_ready_contacts` | One row per usable channel with its A/B/C grade, confidence and source — this is the CSV export |
+| `buyer_outreach_summary` | Per-buyer rollup for the list screen: reachable channels, verified channels, named people, best grade |
+
+The practical rule: an inferred email can be stored and shown in the app, but it only becomes exportable after a mailbox check says `valid` or `catch_all`. Verified working lists bounce around 1.2%, unverified ones around 7.8%, and purchased lists around 18.5% — 2% is the industry ceiling before mail providers start throttling a customer's domain.
 
 Writes come from connectors running with the service role; members only read (`insert`/`update`/`delete` are revoked from `authenticated`, and `db:verify` asserts that).
 
