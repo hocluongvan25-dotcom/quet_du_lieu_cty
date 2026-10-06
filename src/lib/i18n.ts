@@ -57,6 +57,7 @@ export const copy = {
     nav: {
       overview: "Tổng quan",
       reports: "Company Reports",
+      buyers: "Buyer & kênh liên hệ",
       archive: "Lưu trữ",
       history: "Lịch sử thay đổi",
       team: "Thành viên",
@@ -230,6 +231,7 @@ export const copy = {
     nav: {
       overview: "Overview",
       reports: "Company Reports",
+      buyers: "Buyers & channels",
       archive: "Archive",
       history: "Change history",
       team: "Team members",

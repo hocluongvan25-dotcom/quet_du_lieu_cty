@@ -173,7 +173,7 @@ Chỉ tính credit khi có kết quả mới; job lỗi phải hoàn credit (sch
 
 ## 9. Định dạng output chuẩn (đã chốt 06/10/2026)
 
-Mọi report trả cho khách phải có đủ 5 khối, theo thứ tự này. Đây là hợp đồng với người dùng, không phải gợi ý trình bày.
+Mọi report trả cho khách có 4 khối, theo thứ tự này. Đây là hợp đồng với người dùng, không phải gợi ý trình bày.
 
 **1. Khối công ty** — tên, website, LinkedIn, ngành, **năm thành lập, quy mô nhân sự, địa chỉ**, mô tả 1–2 câu.
 
@@ -181,25 +181,22 @@ Mọi report trả cho khách phải có đủ 5 khối, theo thứ tự này. �
 
 **3. Khối kênh công ty** — điện thoại, email chung, email bộ phận, email công bố theo vùng. Mỗi dòng: giá trị, nguồn (URL), `certainty`, `identity_match`, và **được phép làm gì** (`policy`).
 
-**4. Khối "Không tìm thấy & đã loại trừ"** — bắt buộc, không được bỏ trống cho tiện. Ghi rõ thứ không tìm được và **tại sao**, và loại những giá trị trông giống nhưng không phải (ví dụ số điện thoại của đơn vị vận hành web store).
+**4. Khối nguồn** — danh sách URL đã đối chiếu, kèm ngày.
 
-**5. Khối nguồn** — danh sách URL đã đối chiếu, kèm ngày.
+Không hiển thị danh sách "không tìm thấy" cho người dùng. Việc **loại trừ** vẫn phải diễn ra (giá trị của bên thứ ba, số điện thoại của đơn vị vận hành web store, email đuôi tên file ảnh…) nhưng là việc của hệ thống, không phải nội dung để đọc: người dùng cần danh sách đã sạch, không cần biết hệ thống đã bỏ qua những gì.
 
 Quy tắc bắt buộc:
 
 - Không giá trị nào được xuất hiện mà thiếu nguồn hoặc thiếu nhãn tin cậy.
-- Thiếu thì ghi là thiếu. Không suy diễn, không sinh email theo pattern ở tầng này.
+- Thiếu thì để trống. Không suy diễn, không sinh email theo pattern ở tầng này, và cũng không liệt kê những gì không tìm được.
 - **Ranh giới sản phẩm:** hệ thống chỉ TÌM thông tin liên quan và ghi nguồn. Chọn ai, liên hệ thế nào, thứ tự ưu tiên ra sao là việc của người dùng — report không chứa lời khuyên bán hàng.
 - Mỗi kênh chỉ mang một nhãn tin cậy (`Đã thấy công bố` / `Chưa kiểm lại` / `Suy luận theo pattern`) và một quyền (`Gửi được` / `Cần kiểm tra mailbox trước khi gửi` / `Liên hệ thủ công` / `Cần bạn xác nhận`).
-- Khối 4 là chỗ thể hiện sự trung thực của sản phẩm: một report không có mục "không tìm thấy" là report chưa tìm kỹ.
 
 Ví dụ chuẩn đang chạy: `src/lib/demo-mariani.ts` (Mariani Packing, đối chiếu 06/10/2026) — gõ `Mariani` trong demo để mở.
 
 ---
 
----
-
-## 11. Nguyên tắc: chỉ dữ liệu, không lời khuyên
+## 10. Nguyên tắc: chỉ dữ liệu, không lời khuyên
 
 Nền tảng **tìm thông tin và ghi nguồn**. Nó không đưa ra cẩm nang bán hàng, không xếp hạng nên gặp ai, không hướng dẫn cách tiếp cận.
 
@@ -220,7 +217,7 @@ Chốt chặn kỹ thuật: `npm run check:content` quét `src/lib` và `src/com
 
 ---
 
-## 12. Connector: chỉ đọc trang công khai, và chỉ ghi lại thứ đã thấy
+## 11. Connector: chỉ đọc trang công khai, và chỉ ghi lại thứ đã thấy
 
 Connector biến một tên miền thành danh sách kênh liên hệ công khai. Nó chạy ở nơi có internet (máy người dùng hoặc server), không chạy trong sandbox.
 
@@ -263,3 +260,31 @@ Hoặc qua API: `POST /api/connector` với `{ "domain": "mariani.com" }`.
 - 2 người công bố kèm email: Steve Sousa, Todd Garcia;
 - loại trừ đúng: `mariani@worldpantry.com` và số `989-514-1459` của đơn vị vận hành web store;
 - "chưa thấy": WhatsApp, kèm ghi chú trang chỉ có chat trực tuyến (Gorgias).
+
+---
+
+## 12. Danh sách buyer & xuất CSV
+
+Màn hình `/[locale]/buyers` là chế độ list-first: nhiều công ty trên một bảng, mở rộng một dòng để xem kênh liên hệ đã tìm được.
+
+| Cột | Ý nghĩa |
+| --- | --- |
+| Công ty | tên, quốc gia, ngành |
+| Kênh xuất được | số kênh đã qua policy (kèm số đã xác minh) |
+| Người liên hệ | số người tìm được tên |
+| Thấy lần cuối | lần cuối hệ thống thấy dữ liệu liên hệ |
+
+Bấm một dòng để xem từng kênh: giá trị, người + chức danh (nếu có), `identity_match`, nhãn tin cậy, và link nguồn.
+
+### CSV
+
+`GET /api/export/buyers` (nút "Xuất CSV" trên màn hình gọi endpoint này).
+
+- Dữ liệu lấy từ view `outreach_ready_contacts` — **đã áp policy**, nên CSV không cần lọc lại: kênh chưa kiểm mailbox, catch-all, hết hạn đều không nằm trong view.
+- Cột: `company, country, website, person_name, job_title, department, channel_type, channel_value, confidence, identity_match, deliverability, verified, export_scope, source_url, last_seen`.
+- **Không có cột xếp hạng, điểm, mức ưu tiên hay khuyến nghị** — có test khẳng định điều này.
+- BOM UTF-8 + xuống dòng CRLF để Excel mở tiếng Việt không lỗi font.
+- Bộ lọc trên màn hình truyền xuống endpoint (`country`, `q`, `people`), nên file tải về đúng bằng những gì đang nhìn thấy.
+- Số dòng bị giữ lại hiển thị ngay trên màn hình (ví dụ "3 kênh bị giữ lại") để file không bị hiểu là thiếu dữ liệu một cách âm thầm.
+
+Kiểm chứng: `npm run export:test` — 43 check, gồm đọc lại CSV bằng parser RFC 4180 để chắc dấu nháy và dấu phẩy sống sót, và kiểm không có cột khuyến nghị.

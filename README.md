@@ -179,6 +179,16 @@ An inferred email can be stored and shown in the app, but it only becomes export
 
 Writes come from connectors running with the service role; members only read (`insert`/`update`/`delete` are revoked from `authenticated`, and `db:verify` asserts that).
 
+### Buyer list and CSV export
+
+`/[locale]/buyers` is the list-first view: one row per company with its exportable channel count, named people, and last-seen date. Expanding a row shows each channel with its person, role, `identity_match`, confidence label and source link.
+
+`GET /api/export/buyers` returns the CSV the screen's export button downloads. It reads `outreach_ready_contacts`, which already applies the policy, so withheld rows (mailbox unchecked, catch-all, expired) are absent by construction rather than by a filter in the handler. Columns are data only — no ranking, score, priority or advice column — and a test asserts that. BOM UTF-8 and CRLF so Excel opens Vietnamese text correctly; the screen's filters are passed through, and the count of withheld rows is shown on the page so an export is never quietly short.
+
+```bash
+npm run export:test   # 43 checks, including re-reading the CSV with an RFC 4180 parser
+```
+
 ### Connector: public pages to sourced channels
 
 `src/lib/connector/` turns a domain into contact channels found on public pages. Rules are enforced in code and covered by tests: public pages only (no login, no cookies, no CAPTCHA solving), robots.txt respected, same-domain only, every value carries the page URL and the exact sentence it was found in, and no email is ever generated from a pattern.

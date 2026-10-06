@@ -219,31 +219,5 @@ export const marianiReport: CompanyReport = {
         },
       ],
     },
-  ],
-  notes: [
-    {
-      kind: "not_found",
-      label: "Đầu mối Product Development / Innovation",
-      detail: "Chưa tìm thấy tên nào từ nguồn công khai cho vai trò này.",
-      sourceUrl: "https://mariani.com/pages/experience-meets-innovation",
-    },
-    {
-      kind: "not_found",
-      label: "WhatsApp chính thức",
-      detail:
-        "Trang Contact chỉ có chat trên website, không có liên kết wa.me hay số WhatsApp nào được công bố. Không suy diễn từ số tổng đài.",
-      sourceUrl: "https://mariani.com/pages/contact-us",
-    },
-    {
-      kind: "not_found",
-      label: "Email cá nhân của Stacy Nygard / Bella Huk",
-      detail: "Chỉ có profile LinkedIn công khai. Không sinh email theo pattern khi chưa qua bước kiểm tra mailbox.",
-    },
-    {
-      kind: "excluded",
-      label: "+1 989-514-1459 · mariani@worldpantry.com",
-      detail: "Có trên trang Contact nhưng thuộc WorldPantry, đơn vị vận hành web store — không phải liên hệ của Mariani.",
-      sourceUrl: "https://mariani.com/pages/contact-us",
-    },
-  ],
+  ]
 };

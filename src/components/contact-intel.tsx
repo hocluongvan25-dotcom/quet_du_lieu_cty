@@ -1,9 +1,9 @@
 "use client";
 
-import { BadgeCheck, Copy, ExternalLink, HelpCircle, Info, Mail, Phone, ShieldQuestion, UserRound, XCircle } from "lucide-react";
+import { BadgeCheck, Copy, ExternalLink, Mail, Phone, UserRound } from "lucide-react";
 
 import type { AppLocale } from "@/lib/i18n";
-import type { Certainty, ChannelPolicy, DecisionMaker, IdentityMatch, IntelNote } from "@/lib/demo-data";
+import type { Certainty, ChannelPolicy, DecisionMaker, IdentityMatch } from "@/lib/demo-data";
 
 /**
  * What the report shows about people: who they are, their role, and the public
@@ -120,39 +120,6 @@ export function PeoplePanel({ locale, people, onCopy }: { locale: AppLocale; peo
               <span className="text-[9px] text-[#A1A5B1]">{isVietnamese ? "Thấy lần cuối" : "Last seen"} {person.lastSeenAt}</span>
             </div>
           </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-export function IntelNotesPanel({ locale, notes }: { locale: AppLocale; notes: IntelNote[] }) {
-  const isVietnamese = locale === "vi";
-  if (notes.length === 0) return null;
-
-  return (
-    <section className="mt-6">
-      <div className="flex items-center gap-2">
-        <ShieldQuestion size={15} className="text-[#8A6BD1]" />
-        <h3 className="text-[14px] font-bold text-[#333747]">{isVietnamese ? "Không tìm thấy & đã loại trừ" : "Not found & excluded"}</h3>
-      </div>
-      <p className="mt-1 text-[11px] text-[#8A90A0]">
-        {isVietnamese ? "Ghi lại thứ không tìm được, và loại những gì trông giống nhưng không phải." : "Records what could not be found, and excludes look-alikes."}
-      </p>
-      <div className="mt-3 space-y-2">
-        {notes.map((note) => (
-          <div key={note.label} className="flex items-start gap-2.5 rounded-xl border border-[#EDEAF7] bg-[#FBFAFF] p-3">
-            {note.kind === "not_found" ? <HelpCircle size={15} className="mt-0.5 shrink-0 text-[#8A6BD1]" /> : <XCircle size={15} className="mt-0.5 shrink-0 text-[#C2445C]" />}
-            <div className="min-w-0">
-              <p className="text-[11px] font-bold text-[#3B3F4F]">{note.label}</p>
-              <p className="mt-1 text-[10px] leading-4 text-[#757B8A]">{note.detail}</p>
-              {note.sourceUrl ? (
-                <a href={note.sourceUrl} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#6257E7] hover:text-[#4335CB]">
-                  <Info size={11} /> {isVietnamese ? "Xem nguồn đã đối chiếu" : "View the source checked"} <ExternalLink size={10} />
-                </a>
-              ) : null}
-            </div>
-          </div>
         ))}
       </div>
     </section>

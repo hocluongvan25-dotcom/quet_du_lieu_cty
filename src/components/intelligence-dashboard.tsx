@@ -44,7 +44,7 @@ import { CompanyReport, Contact, initialReports } from "@/lib/demo-data";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { SignOutButton } from "@/components/sign-out-button";
 import { WorkspaceNotice } from "@/components/workspace-notice";
-import { IntelNotesPanel, PeoplePanel, ProvenanceBadge } from "@/components/contact-intel";
+import { PeoplePanel, ProvenanceBadge } from "@/components/contact-intel";
 import { DEMO_CREDITS, REPORT_COST, type WorkspaceSnapshot } from "@/lib/data/workspace-types";
 import { getCopy, normalizeLocale, type AppLocale } from "@/lib/i18n";
 
@@ -103,7 +103,6 @@ function reportSummaryForClipboard(report: CompanyReport, locale: AppLocale) {
           ),
         ]
       : []),
-    ...(report.notes?.length ? ["", `${isVietnamese ? "GHI CHÚ" : "NOTES"}:`, ...report.notes.map((note) => `• ${note.label}`)] : []),
     "",
     `${isVietnamese ? "NGUỒN" : "SOURCES"}:`,
     ...report.sources.map((source) => `• ${source.label}: ${source.url}`),
@@ -625,8 +624,6 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
               );
             })}
           </div>
-
-          {report.notes && report.notes.length > 0 ? <IntelNotesPanel locale={locale} notes={report.notes} /> : null}
 
           <div className="mt-6 flex items-center justify-between"><div><h3 className="text-[14px] font-bold text-[#333747]">{t.drawer.sources}</h3><p className="mt-1 text-[11px] text-[#8A90A0]">{t.drawer.sourcesText}</p></div><span className="rounded-full bg-[#F0EEFF] px-2 py-1 text-[10px] font-bold text-[#6257E7]">{report.sources.length} sources</span></div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">

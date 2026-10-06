@@ -88,8 +88,6 @@ export type CompanyReport = {
   signals: string[];
   /** Decision makers / department routes, ranked for this search. */
   people?: DecisionMaker[];
-  /** Not-found and excluded findings, so absence is visible instead of invented. */
-  notes?: IntelNote[];
 };
 
 export const initialReports: CompanyReport[] = [marianiReport, 

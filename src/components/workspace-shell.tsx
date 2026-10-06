@@ -5,6 +5,7 @@ import { ReactNode } from "react";
 import {
   Archive,
   Bell,
+  Building2,
   ChevronDown,
   ChevronRight,
   CircleHelp,
@@ -26,7 +27,7 @@ import { DEMO_CREDITS } from "@/lib/data/workspace-types";
 import { getCopy, normalizeLocale } from "@/lib/i18n";
 import { useParams } from "next/navigation";
 
-type WorkspaceNavKey = "overview" | "reports" | "archive" | "history" | "team" | "billing" | "settings";
+type WorkspaceNavKey = "overview" | "reports" | "buyers" | "archive" | "history" | "team" | "billing" | "settings";
 
 type WorkspaceShellProps = {
   children: ReactNode;
@@ -47,6 +48,7 @@ export function WorkspaceShell({ children, active }: WorkspaceShellProps) {
   const primary: Array<{ key: WorkspaceNavKey; icon: typeof LayoutDashboard; href: string }> = [
     { key: "overview", icon: LayoutDashboard, href: prefix },
     { key: "reports", icon: FileSearch, href: `${prefix}/reports` },
+    { key: "buyers", icon: Building2, href: `${prefix}/buyers` },
     { key: "archive", icon: Archive, href: `${prefix}/archive` },
     { key: "history", icon: History, href: `${prefix}/history` },
   ];

@@ -1,6 +1,6 @@
 /**
  * Kiểu dữ liệu của connector. Chỉ có giá trị tìm được, nguồn, bằng chứng và
- * nhãn tin cậy — không có trường nào mang tính khuyên bảo (xem spec §11).
+ * nhãn tin cậy — không có trường nào mang tính khuyên bảo (xem spec §10).
  */
 
 export type Certainty = "confirmed" | "probable" | "inferred";
