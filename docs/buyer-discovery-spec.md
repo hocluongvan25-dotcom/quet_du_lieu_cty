@@ -498,3 +498,50 @@ Công ty vừa tra xuất hiện trong `/vi/buyers` (view `buyer_outreach_summar
 ### Còn thiếu
 
 Đúng như bản đối chiếu: enum `role_kind` / `email_kind` để Role và Email thành cổng chặn thật; job re-verify 90–180 ngày; nguồn cấp 2 (search API, sổ đăng ký); resolve pháp nhân từ dữ liệu hải quan.
+
+---
+
+## 18. Bằng chứng thành ràng buộc cứng, và lần kiểm thứ hai (07/10/2026)
+
+Migration 007 đóng nốt khoảng cách giữa "đã biết phải làm gì" và "database bắt buộc phải làm thế".
+
+### Câu trích dẫn: từ "nên có" thành bắt buộc
+
+005 đã buộc mọi dòng `confirmed` phải có `source_url`. Nhưng `evidence_snippet` vẫn cho phép NULL, nên vẫn lọt được một giá trị mà không ai chỉ ra được nó nằm ở đâu. 007 thêm ràng buộc:
+
+```sql
+check (certainty <> 'confirmed' or nullif(btrim(coalesce(evidence_snippet, '')), '') is not null)
+```
+
+Nghĩa là: **một dòng `confirmed` mà không có câu trích dẫn thì database từ chối thẳng**, không phải chỉ code cẩn thận. Thêm cột `evidence_url` — bản sao có tên rõ nghĩa của `source_url`, để câu SQL đọc bằng chứng không phải biết tên cột cũ.
+
+### Hồ sơ LinkedIn cá nhân cũng bị chặn ở tầng dữ liệu
+
+Quy tắc "hồ sơ `/in/` không phải kênh của công ty" trước đây nằm ở code (`extract.ts`) và tầng ghi (`persist.ts`). Giờ nó thành ràng buộc: một URL `/in/` chỉ tồn tại được khi nó thuộc về một người có tên trong `decision_makers`.
+
+### `is_verified` chỉ đến từ một đường
+
+Không có policy update nào trên `contact_channels`, và quyền ghi đã bị thu hồi khỏi `authenticated`. 007 thêm hàm duy nhất được bật cờ đó:
+
+```sql
+select public.verify_contact_channel('<channel-id>');  -- chỉ service role gọi được
+```
+
+Hàm chỉ trả `true` khi hội đủ: không phải phỏng đoán (`certainty <> 'inferred'`), hộp thư không phải loại đã biết là hỏng, và có **cả** trang nguồn lẫn câu trích dẫn. Không đủ thì trả `false`, không ném lỗi — người gọi cần biết "chưa xác minh được", không cần một ngoại lệ khó hiểu.
+
+### Một điểm hệ thống làm chặt hơn thiết kế
+
+Thiết kế đặt Email Gate ở chỗ "công bố hay tự đoán". Hệ thống còn một câu hỏi nữa, và tách hẳn ra: **hộp thư có tồn tại không**. Kể cả khi đã xác minh chủ sở hữu, một email chưa kiểm mailbox vẫn **chưa** `outreach_eligible` — vì gửi vào đó có thể trả về bounce. Nó vẫn xuất được (`exportable`), chỉ chưa dùng để gửi tự động. Muốn dùng thì chạy bước kiểm mailbox (≈2–10 USD/1.000, spec §14).
+
+Chuỗi trạng thái đầy đủ, kiểm trong `npm run persist:test`:
+
+| Bước | `exportable` | `outreach_eligible` | `blocked_reason` |
+| --- | --- | --- | --- |
+| Vừa đọc được trên trang công khai | ✅ | ❌ | `deliverability_unchecked` |
+| Xác minh chủ sở hữu (`verify_contact_channel`) | ✅ | ❌ | `deliverability_unchecked` |
+| Kiểm mailbox xong (`deliverability = 'valid'`) | ✅ | ✅ | — |
+
+### Kiểm chứng
+
+- `npm run db:verify` — 7 migration, thêm 7 check: dòng `confirmed` thiếu câu trích dẫn bị từ chối, `evidence_url` phản chiếu đúng trang đã đọc, `/in/` đứng một mình bị từ chối, hàm xác minh nhận dòng đủ điều kiện và từ chối phỏng đoán lẫn hộp thư đã biết là hỏng, và `authenticated` không gọi được hàm đó.
+- `npm run persist:test` — 54 check, gồm cả chuỗi ba trạng thái ở bảng trên và hai ràng buộc mới bị database từ chối thi hành.

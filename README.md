@@ -71,7 +71,7 @@ The app keeps working without `.env.local`; it stays in demo mode.
 ## Connect Supabase
 
 1. Create a Supabase project.
-2. Run every file in `supabase/migrations/` (six, in order) in its SQL editor, or use the Supabase CLI:
+2. Run every file in `supabase/migrations/` (seven, in order) in its SQL editor, or use the Supabase CLI:
 
    ```bash
    supabase link --project-ref YOUR_PROJECT_REF
@@ -211,7 +211,7 @@ A line only becomes an item when it names one of those and either carries requir
 
 ```bash
 npm run requirements:test   # 24 checks: no fabrication, verbatim evidence, sources, PDF, no advice
-npm run persist:test      # 46 checks: rows built from real findings, then written into a real Postgres and read back through the app's views
+npm run persist:test      # 54 checks: rows built from real findings, written into a real Postgres, read back through the app's views, then verified and exported
 ```
 
 ### Connector: public sources to sourced channels
@@ -260,7 +260,9 @@ Four rules the write layer cannot break, all covered by `npm run persist:test`:
 1. **`contact_candidates` stays empty.** That table is for pattern-guessed emails; the connector never guesses one.
 2. **`is_verified` stays `false`.** "This value is on a public page" is not "this mailbox belongs to that person", and the schema keeps the two apart.
 3. **No row without a source and a quote.** Every channel carries `source_url` plus the verbatim sentence (`evidence_snippet`) it was read from; anything missing either one is dropped and listed with a reason.
-4. **No personal LinkedIn profile as a company channel.** `/in/…` links are excluded in extraction and blocked again at the write layer.
+4. **No personal LinkedIn profile as a company channel.** `/in/…` links are excluded in extraction, blocked at the write layer, and — since migration 007 — refused by the database unless the row belongs to a named person.
+
+Migration 007 makes evidence a column-level rule rather than a convention: a `confirmed` row without a quote is rejected by `contact_channels_confirmed_needs_quote`, `evidence_url` names the page each value was read from, and `is_verified` can only be set by `verify_contact_channel(uuid)` — a service-role-only function that refuses guesses, mailboxes known to be dead, and rows without both a page and a quote. Ownership and deliverability stay separate questions: a verified published address is exportable but not `outreach_eligible` until its mailbox has been checked.
 
 `country` is required and is never inferred from the domain suffix: missing it returns `persisted: false` with that reason instead of storing half a row. Writes go through the service role — migrations 005/006 revoke insert/update on the buyer tables from `authenticated`, so the browser cannot write buyer data — and `organization_id` always comes from the session, never from the request body.
 

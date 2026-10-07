@@ -395,12 +395,24 @@ check("role signal without a name is accepted", Boolean(roleSignalId));
 
 await db.query(
   `insert into public.contact_channels
-     (organization_id, buyer_profile_id, decision_maker_id, market_source_id, channel_type, value, provenance, source_url, is_verified, verified_at, expires_at)
+     (organization_id, buyer_profile_id, decision_maker_id, market_source_id, channel_type, value, provenance, source_url, evidence_snippet, is_verified, verified_at, expires_at)
    values ($1, $2, $3, $4, 'email', 'procurement@greatlakespackaging.example', 'company_site',
-           'https://greatlakespackaging.example/contact', true, now(), now() + interval '90 days')`,
+           'https://greatlakespackaging.example/contact', 'Supplier enquiries: procurement@greatlakespackaging.example', true, now(), now() + interval '90 days')`,
   [orgId, buyerId, personId, websiteSourceId],
 );
 check("public company channel accepted", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerId])).rows[0].n === 1);
+
+// 007: một giá trị confirmed phải chỉ ra được câu chữ đã thấy nó.
+const confirmedWithoutQuote = await expectFailure(
+  `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, source_url)
+   values ($1, $2, 'email', 'quotecheck@greatlakespackaging.example', 'company_site', 'https://greatlakespackaging.example/contact')`,
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("a confirmed channel without a quote is rejected", confirmedWithoutQuote.ok, confirmedWithoutQuote.message);
+
+const evidenceMirror = (await db.query("select source_url, evidence_url from public.contact_channels where value = 'procurement@greatlakespackaging.example'")).rows[0];
+check("evidence_url is the page it was read from", evidenceMirror.evidence_url === evidenceMirror.source_url, JSON.stringify(evidenceMirror));
 
 // Guessing is allowed, but it must be labelled, short-lived and never claimed as ours.
 const guessSetByCaller = await expectFailure(
@@ -470,12 +482,58 @@ check("an inferred value is stored but flagged as a guess", inferredRow.is_guess
 // A profile URL that was actually found out in the open is fine.
 const foundProfile = await db.query(
   `insert into public.contact_channels
-     (organization_id, buyer_profile_id, decision_maker_id, channel_type, value, provenance, certainty, discovered_by, source_url)
-   values ($1, $2, $3, 'linkedin_url', 'https://www.linkedin.com/in/dana-whitfield', 'company_site', 'confirmed', 'web_research_agent', 'https://greatlakespackaging.example/team')
+     (organization_id, buyer_profile_id, decision_maker_id, channel_type, value, provenance, certainty, discovered_by, source_url, evidence_snippet)
+   values ($1, $2, $3, 'linkedin_url', 'https://www.linkedin.com/in/dana-whitfield', 'company_site', 'confirmed', 'web_research_agent', 'https://greatlakespackaging.example/team',
+           'Dana Whitfield, Procurement Manager — linkedin.com/in/dana-whitfield')
    returning id`,
   [orgId, buyerId, personId],
 );
 check("a found profile URL is accepted when the page is cited", Boolean(foundProfile.rows[0].id));
+
+const orphanProfile = await expectFailure(
+  `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, source_url, evidence_snippet)
+   values ($1, $2, 'linkedin_url', 'https://www.linkedin.com/in/someone-else', 'company_site', 'https://greatlakespackaging.example/team',
+           'Liên kết trên greatlakespackaging.example')`,
+  [orgId, buyerId],
+  "violates check constraint",
+);
+check("a personal profile is never a company channel", orphanProfile.ok, orphanProfile.message);
+
+// --- 007: lần kiểm tra thứ hai là đường duy nhất bật is_verified ---------------
+const quotable = (
+  await db.query(
+    `insert into public.contact_channels
+       (organization_id, buyer_profile_id, channel_type, value, provenance, source_url, evidence_snippet, identity_match)
+     values ($1, $2, 'email', 'quoted@greatlakespackaging.example', 'company_site', 'https://greatlakespackaging.example/contact',
+             'Purchasing: quoted@greatlakespackaging.example', 'department')
+     returning id`,
+    [orgId, buyerId],
+  )
+).rows[0].id;
+const verifyOk = (await db.query("select public.verify_contact_channel($1) as ok", [quotable])).rows[0].ok;
+const verifiedRow = (await db.query("select is_verified, verified_at, verified_by from public.contact_channels where id = $1", [quotable])).rows[0];
+check(
+  "a quoted channel can be verified, and the moment is recorded",
+  verifyOk === true && verifiedRow.is_verified === true && Boolean(verifiedRow.verified_at) && verifiedRow.verified_by === "verifier",
+  JSON.stringify(verifiedRow),
+);
+check("a guess can never be verified", (await db.query("select public.verify_contact_channel($1) as ok", [inferredChannelId])).rows[0].ok === false);
+
+const deadButQuoted = (
+  await db.query(
+    `insert into public.contact_channels
+       (organization_id, buyer_profile_id, channel_type, value, provenance, source_url, evidence_snippet, deliverability)
+     values ($1, $2, 'email', 'bounced@greatlakespackaging.example', 'company_site', 'https://greatlakespackaging.example/contact',
+             'Sales: bounced@greatlakespackaging.example', 'invalid')
+     returning id`,
+    [orgId, buyerId],
+  )
+).rows[0].id;
+check("a mailbox known to be dead cannot be verified either", (await db.query("select public.verify_contact_channel($1) as ok", [deadButQuoted])).rows[0].ok === false);
+
+// Hai dòng vừa tạo chỉ để thử hàm xác minh: dọn đi để các phép đếm phía sau
+// vẫn đo đúng thứ chúng định đo.
+await db.query("delete from public.contact_channels where id = any($1::uuid[])", [[quotable, deadButQuoted]]);
 
 const privateChannel = await expectFailure(
   `insert into public.contact_channels (organization_id, buyer_profile_id, channel_type, value, provenance, is_public)
@@ -504,8 +562,9 @@ check("licensed contact data must name its source row", licensedWithoutSource.ok
 const licensedChannelId = (
   await db.query(
     `insert into public.contact_channels
-       (organization_id, buyer_profile_id, market_source_id, channel_type, value, provenance, source_url, expires_at)
-     values ($1, $2, $3, 'phone', '+1 216 555 0143', 'licensed_contact_db', 'https://volza.com/company/great-lakes-packaging', now() - interval '1 day')
+       (organization_id, buyer_profile_id, market_source_id, channel_type, value, provenance, source_url, evidence_snippet, expires_at)
+     values ($1, $2, $3, 'phone', '+1 216 555 0143', 'licensed_contact_db', 'https://volza.com/company/great-lakes-packaging',
+             'Purchasing line: +1 216 555 0143', now() - interval '1 day')
      returning id`,
     [orgId, buyerId, licensedSourceId],
   )
@@ -541,6 +600,9 @@ const clientChannelWrite = await expectFailure(
   "permission denied",
 );
 check("members cannot add contact channels from the client", clientChannelWrite.ok, clientChannelWrite.message);
+
+const verifyFromClient = await expectFailure("select public.verify_contact_channel(gen_random_uuid())", [], "permission denied");
+check("members cannot mark a channel verified from the client", verifyFromClient.ok, verifyFromClient.message);
 
 // --- what may leave the building (export views) -------------------------------
 const rawChannelCount = (await db.query("select count(*)::int as n from public.contact_channels")).rows[0].n;

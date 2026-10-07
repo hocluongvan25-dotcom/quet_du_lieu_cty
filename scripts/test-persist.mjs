@@ -8,7 +8,7 @@
  *
  *  1. Dựng dữ liệu (hàm thuần): thiếu gì thì từ chối, thừa gì thì bỏ, và
  *     không bao giờ sinh email theo pattern.
- *  2. Ghi thật vào Postgres trong tiến trình (PGlite) với đúng 6 migration,
+ *  2. Ghi thật vào Postgres trong tiến trình (PGlite) với đúng 7 migration,
  *     rồi đọc lại qua chính các view mà ứng dụng dùng
  *     (`contact_export_policy`, `buyer_outreach_summary`, `outreach_ready_contacts`).
  *
@@ -373,9 +373,9 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   check("mỗi đường vào đều có nguồn", batch.routes.every((route) => route.source_url.startsWith("http")));
 
   // ------------------------------------------------- 2. ghi vào Postgres thật --
-  section("ghi vào Postgres thật (PGlite, đủ 6 migration)");
+  section("ghi vào Postgres thật (PGlite, đủ 7 migration)");
   const { db, migrationCount } = await bootDatabase();
-  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 6);
+  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 7, String(migrationCount));
 
   await db.query(
     `insert into auth.users (id, email, raw_user_meta_data)
@@ -397,6 +397,10 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   check(
     "mọi kênh đều có source_url + câu chữ bằng chứng",
     (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1 and (source_url is null or btrim(coalesce(evidence_snippet, '')) = '')", [buyerRow.id])).rows[0].n === 0,
+  );
+  check(
+    "mọi dòng đọc được trang nguồn qua cột bằng chứng (007)",
+    (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1 and evidence_url is null", [buyerRow.id])).rows[0].n === 0,
   );
   check(
     "không kênh nào bị đánh dấu verified",
@@ -448,6 +452,71 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   check("workspace khác không thấy buyer này", (await db.query("select count(*)::int as n from public.buyer_outreach_summary where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 0);
   check("workspace khác không thấy kênh", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 0);
   await db.query("reset role");
+
+  // ------------------------------------------- 3. lần kiểm tra thứ hai (007) --
+  section("xác minh kênh (007)");
+  const quotedChannelId = (
+    await db.query("select id from public.contact_channels where buyer_profile_id = $1 and value = 'procurement@acme.example'", [buyerRow.id])
+  ).rows[0].id;
+
+  const beforeVerify = (
+    await db.query("select blocked_reason, outreach_eligible from public.contact_export_policy where id = $1", [quotedChannelId])
+  ).rows[0];
+  check("trước khi kiểm: chưa dùng để gửi tự động", beforeVerify.outreach_eligible === false && beforeVerify.blocked_reason === "deliverability_unchecked", JSON.stringify(beforeVerify));
+
+  const verifyOk = (await db.query("select public.verify_contact_channel($1) as ok", [quotedChannelId])).rows[0].ok;
+  const afterVerify = (
+    await db.query("select is_verified, verified_at, exportable, blocked_reason, outreach_eligible from public.contact_export_policy where id = $1", [quotedChannelId])
+  ).rows[0];
+  check("kiểm tra thứ hai bật is_verified và ghi lại thời điểm", verifyOk === true && afterVerify.is_verified === true && Boolean(afterVerify.verified_at), JSON.stringify(afterVerify));
+  // Chủ sở hữu đã rõ vẫn chưa đủ để gửi tự động: hộp thư chưa được kiểm thì vẫn
+  // có thể trả về bounce. Hai câu hỏi khác nhau, và policy tách đúng hai câu.
+  check(
+    "xác minh chủ sở hữu xong vẫn chưa outreach-ready khi hộp thư chưa kiểm",
+    afterVerify.exportable === true && afterVerify.outreach_eligible === false && afterVerify.blocked_reason === "deliverability_unchecked",
+    JSON.stringify(afterVerify),
+  );
+
+  // Bước kiểm mailbox là bước riêng, có nhà cung cấp riêng — mô phỏng kết quả.
+  await db.query("update public.contact_channels set deliverability = 'valid', deliverability_checked_at = now() where id = $1", [quotedChannelId]);
+  const afterMailbox = (
+    await db.query("select blocked_reason, outreach_eligible from public.contact_export_policy where id = $1", [quotedChannelId])
+  ).rows[0];
+  check("kiểm mailbox xong thì hết lý do chặn và được phép dùng", afterMailbox.blocked_reason === null && afterMailbox.outreach_eligible === true, JSON.stringify(afterMailbox));
+
+  // Database từ chối thẳng một dòng confirmed mà không có câu trích dẫn (007).
+  const websiteSourceId = (await db.query("select id from public.market_sources where key = 'company_website'")).rows[0].id;
+  let quoteRefused = "";
+  try {
+    await db.query(
+      `insert into public.contact_channels
+         (organization_id, buyer_profile_id, market_source_id, channel_type, value, provenance, discovered_by, source_url)
+       values ($1, $2, $3, 'email', 'unquoted@acme.example', 'company_site', 'manual', 'https://acme.example/contact')`,
+      [batch.organizationId, buyerRow.id, websiteSourceId],
+    );
+  } catch (error) {
+    quoteRefused = error.message;
+  }
+  check("database từ chối dòng confirmed thiếu câu trích dẫn", quoteRefused.includes("contact_channels_confirmed_needs_quote"), quoteRefused);
+
+  // Hồ sơ LinkedIn cá nhân cũng bị database chặn, không chỉ code.
+  let profileRefused = "";
+  try {
+    await db.query(
+      `insert into public.contact_channels
+         (organization_id, buyer_profile_id, market_source_id, channel_type, value, provenance, discovered_by, source_url, evidence_snippet)
+       values ($1, $2, $3, 'linkedin_url', 'linkedin.com/in/someone-else', 'company_site', 'manual', 'https://acme.example/team', 'Liên kết trên acme.example')`,
+      [batch.organizationId, buyerRow.id, websiteSourceId],
+    );
+  } catch (error) {
+    profileRefused = error.message;
+  }
+  check("database từ chối hồ sơ cá nhân đứng một mình", profileRefused.includes("contact_channels_personal_profile_needs_person"), profileRefused);
+
+  check(
+    "xác minh và kiểm mailbox không tạo thêm dòng nào",
+    (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 2,
+  );
 
   await db.close();
   await rm(workDir, { recursive: true, force: true });
