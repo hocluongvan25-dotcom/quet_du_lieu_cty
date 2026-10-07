@@ -350,6 +350,26 @@ function secUserAgentWasNormalized(contact?: string): boolean {
   return Boolean(raw) && asciiHeaderValue(raw) !== raw;
 }
 
+/**
+ * Đọc mã CIK từ phản hồi Atom của EDGAR — và nói rõ **vì sao** không có mã.
+ *
+ * SEC có thể trả mã CIK ở hai dạng, tuỳ bản CGI: thẻ `<cik>0000320193</cik>` trong
+ * khối `<company-info>` (dạng hiện hành), hoặc dạng `CIK=0000320193` nằm trong
+ * liên kết. Bản trước chỉ tìm dạng thứ hai, nên một công ty **có thật** trong sổ
+ * vẫn có thể ra "không tìm thấy hồ sơ" — câu trả lời đúng vì may, không phải vì
+ * đọc được. Ba kết cục phải tách bạch: `found` / `none` (sổ nói không có) /
+ * `unreadable` (không nhận ra định dạng).
+ */
+export function readCikFromEdgarFeed(xml: string): { kind: "found"; cik: string } | { kind: "none" } | { kind: "unreadable" } {
+  const patterns = [/<cik>\s*(\d{1,10})\s*<\/cik>/i, /CIK=(\d{1,10})/i, /<CIK>\s*(\d{1,10})\s*<\/CIK>/];
+  for (const pattern of patterns) {
+    const match = xml.match(pattern);
+    if (match) return { kind: "found", cik: match[1].padStart(10, "0") };
+  }
+  if (/no matching companies|no matching entries|did not match any/i.test(xml)) return { kind: "none" };
+  return { kind: "unreadable" };
+}
+
 function secForbiddenHint(status: number): string {
   return status === 403
     ? " — SEC đòi User-Agent kèm cách liên hệ, đặt SEC_USER_AGENT trong .env.local (ví dụ: \"Tên anh <email@congty.vn>\")"
@@ -455,8 +475,21 @@ export async function lookupSecEdgar(companyName: string, keys: RegistryKeys = {
     }
 
     const xml = await searchResponse.text();
-    const cik = [...xml.matchAll(/CIK=(\d{10})/g)].map((match) => match[1])[0];
-    if (!cik) return { queried: ["sec_edgar"], reason: "không tìm thấy hồ sơ theo tên này" };
+    const lookup = readCikFromEdgarFeed(xml);
+    if (lookup.kind === "none") {
+      // Sổ **nói rõ** không có công ty nào khớp tên — đây là câu trả lời thật.
+      return { queried: ["sec_edgar"], reason: "không tìm thấy hồ sơ theo tên này" };
+    }
+    if (lookup.kind === "unreadable") {
+      // Khác hẳn "không tìm thấy": mình không đọc được phản hồi. Trả về cùng một
+      // câu với trường hợp trên là biến "chưa kiểm được" thành "đã kiểm, không có"
+      // — và đó là loại sai nguy hiểm nhất vì nó trông y như một câu trả lời.
+      return {
+        queried: ["sec_edgar"],
+        reason: "SEC trả về định dạng không nhận ra (không có mã CIK trong phản hồi) — chưa kiểm được, không phải 'không có hồ sơ'",
+      };
+    }
+    const cik = lookup.cik;
 
     const detailResponse = await fetchImpl(`https://data.sec.gov/submissions/CIK${cik}.json`, { headers });
     if (!detailResponse.ok) {

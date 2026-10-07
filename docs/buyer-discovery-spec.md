@@ -624,7 +624,17 @@ Cách sửa: `asciiHeaderValue` (trong `fetch.ts`) bỏ dấu rồi bỏ nốt k
 
 **Bài học về cách tìm lỗi:** câu lỗi "ByteString… value of 273" này **đã từng xuất hiện** trong một phép thử nội bộ trước đó (em dùng token giả có ký tự tiếng Việt), và lúc đó bị đọc là "token giả thì không tính". Đúng ra nó là một lỗi thật đang chờ: **lỗi chỉ được coi là "không tính" khi đã chứng minh được rằng dữ liệu thật không bao giờ rơi vào tình huống đó** — chứ không phải vì dữ liệu thử trông giả.
 
-Điểm chung của cả bốn: **một lần chạy xanh không chứng minh dữ liệu đúng** — nó chỉ chứng minh không có lỗi nào bị ném ra. Ba lỗi này đều là "dữ liệu sai nhưng trông hợp lệ", đúng loại lỗi mà các cổng và nhãn tin cậy sinh ra để chặn.
+**5. "Không tìm thấy hồ sơ" phải là một kết luận, không phải một lần đọc thất bại.** Lần chạy thứ ba đã sạch (biểu mẫu gộp 1, số AAA bị loại, SEC không còn lỗi gửi), và sổ Mỹ trả về:
+
+> `sổ đăng ký không cho kết quả: không tìm thấy hồ sơ theo tên này`
+
+Câu trả lời **đúng** — Mariani là công ty tư nhân, family-owned từ 1906, không nộp hồ sơ cho SEC (kiểm qua hai nguồn độc lập). Nhưng khi soi lại cách mình ra câu trả lời đó thì thấy chưa chắc: theo tài liệu SEC, mã CIK nằm trong thẻ `<cik>` bên trong khối `<company-info>` mà `browse-edgar` thêm vào, còn code chỉ tìm dạng `CIK=0000320193` trong liên kết. Nghĩa là **cùng một câu được in cho hai tình huống khác hẳn nhau**: sổ thật sự không có công ty, và mình không đọc được phản hồi.
+
+Một chỗ in như vậy biến **"chưa kiểm được"** thành **"đã kiểm, không có"** — đúng loại sai mà cả dự án đang chống (xem ba trạng thái của `has_whatsapp`). Sửa: `readCikFromEdgarFeed` đọc cả hai dạng (`<cik>` và `CIK=`), đệm mã cho đủ 10 chữ số, và tách **ba** kết cục — `found` / `none` (sổ nói "No matching companies") / `unreadable`. Chỉ `none` mới được phát biểu thành "không tìm thấy hồ sơ theo tên này"; `unreadable` nói thẳng là chưa kiểm được.
+
+**Bài học:** câu trả lời đúng chưa chứng minh đường đi đúng. Khi một kết quả trùng với điều mình tin, đó chính là lúc phải kiểm cơ chế — vì "đúng vì may" sẽ hỏng ở ca tiếp theo, khi công ty **có** trong sổ.
+
+Điểm chung của cả năm: **một lần chạy xanh không chứng minh dữ liệu đúng** — nó chỉ chứng minh không có lỗi nào bị ném ra. Ba lỗi này đều là "dữ liệu sai nhưng trông hợp lệ", đúng loại lỗi mà các cổng và nhãn tin cậy sinh ra để chặn.
 
 ### Nút WhatsApp trên UI
 
@@ -632,7 +642,7 @@ Cách sửa: `asciiHeaderValue` (trong `fetch.ts`) bỏ dấu rồi bỏ nốt k
 
 ### Kiểm chứng
 
-- `npm run connector:test` — 230 check ở vòng 012 (120 ở vòng này), thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
+- `npm run connector:test` — 241 check ở vòng 012 (120 ở vòng này), thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
 - `npm run persist:test` — 63 check: E.164 được lưu đúng, `has_whatsapp` là `null` sau khi connector ghi, view WhatsApp trống khi chưa kiểm, rồi mô phỏng kết quả kiểm → view trả `https://wa.me/17074522800`, và hai ràng buộc mới bị database từ chối thi hành.
 
 ---
@@ -810,7 +820,7 @@ Với `SEARCH_API_KEY` / `SEARCH_PROVIDER` / `COMPANIES_HOUSE_API_KEY` đặt tr
 
 ### Kiểm chứng
 
-`npm run connector:test` — **230 check** ở vòng 012 (182 ở vòng này, 120 trước đó): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá, hình dạng request/kết quả của cả ba nhà cung cấp, kết quả hỏng bị bỏ), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
+`npm run connector:test` — **241 check** ở vòng 012 (182 ở vòng này, 120 trước đó): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá, hình dạng request/kết quả của cả ba nhà cung cấp, kết quả hỏng bị bỏ), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
 
 ### Kèm theo: `info@` không còn bị xếp là email bộ phận
 

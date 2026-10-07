@@ -100,11 +100,11 @@ import { buildBuyerWriteBatch } from "@/lib/connector/persist";
 import { toE164, whatsappLink, isE164, resolveCountry } from "@/lib/connector/phone";
 import { readSitemap } from "@/lib/connector/sitemap";
 import { coverageOf, secondaryReason } from "@/lib/connector/gate";
-import { searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry, DEFAULT_SEC_USER_AGENT } from "@/lib/connector/secondary";
+import { searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry, DEFAULT_SEC_USER_AGENT, readCikFromEdgarFeed } from "@/lib/connector/secondary";
 import { buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck } from "@/lib/connector/whatsapp";
 import { asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT } from "@/lib/connector/fetch";
 
-export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, collapseFormChannels, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, DEFAULT_SEC_USER_AGENT, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT, lookupSecEdgar, lookupRegistry, registriesForCountry };
+export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, collapseFormChannels, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, DEFAULT_SEC_USER_AGENT, readCikFromEdgarFeed, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT, lookupSecEdgar, lookupRegistry, registriesForCountry };
 `;
   await mkdir(workDir, { recursive: true });
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
@@ -609,6 +609,66 @@ async function runChecks(api, files) {
     "User-Agent do người dùng truyền cho fetchPage cũng được làm sạch",
     uaCalls[0] === "Nguyen Van A <a@congty.vn>",
     uaCalls[0],
+  );
+
+
+  section("SEC EDGAR: ba kết cục phải tách bạch — có / không có / không đọc được");
+  // Dạng hiện hành: mã nằm trong khối <company-info> do browse-edgar thêm vào.
+  const feedCompanyInfo = `<?xml version="1.0" encoding="ISO-8859-1"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <company-info>
+    <cik>0000320193</cik>
+    <conformed-name>Apple Inc.</conformed-name>
+    <assigned-sic>3571</assigned-sic>
+  </company-info>
+  <entry><title>10-K - APPLE INC (0000320193)</title></entry>
+</feed>`;
+  const byTag = api.readCikFromEdgarFeed(feedCompanyInfo);
+  check("đọc được mã trong thẻ <cik> của khối company-info", byTag.kind === "found" && byTag.cik === "0000320193", JSON.stringify(byTag));
+
+  // Dạng cũ: mã nằm trong liên kết CIK=…
+  const feedLink = '<feed><entry><link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0001234567&amp;type=10-K"/></entry></feed>';
+  const byLink = api.readCikFromEdgarFeed(feedLink);
+  check("vẫn đọc được dạng liên kết CIK= của bản CGI cũ", byLink.kind === "found" && byLink.cik === "0001234567", JSON.stringify(byLink));
+
+  check(
+    "mã CIK ngắn được đệm đủ 10 chữ số (SEC yêu cầu zero-pad)",
+    api.readCikFromEdgarFeed("<company-info><cik>320193</cik></company-info>").cik === "0000320193",
+  );
+
+  // Sổ nói thẳng là không có: đây mới là "không tìm thấy hồ sơ theo tên này".
+  const noMatch = "<feed><entry><title>No matching companies.</title></entry></feed>";
+  check("sổ nói không có công ty nào ⇒ none", api.readCikFromEdgarFeed(noMatch).kind === "none");
+  check("câu 'did not match any' cũng tính là none", api.readCikFromEdgarFeed("<html><p>Your search did not match any companies</p></html>").kind === "none");
+
+  // Trang HTML lạ / feed rỗng: KHÔNG được coi là "không có hồ sơ".
+  check("HTML lạ ⇒ unreadable, không phải none", api.readCikFromEdgarFeed("<html><body>Server Error</body></html>").kind === "unreadable");
+  check("feed rỗng ⇒ unreadable", api.readCikFromEdgarFeed("<feed></feed>").kind === "unreadable");
+  check("chuỗi rỗng ⇒ unreadable", api.readCikFromEdgarFeed("").kind === "unreadable");
+
+  const makeSecFeedStub = (xml, status = 200) => async (url) => ({
+    ok: status === 200,
+    status,
+    url: String(url),
+    headers: { get: () => "application/atom+xml" },
+    text: async () => xml,
+    json: async () => ({}),
+  });
+  const unreadable = await api.lookupSecEdgar("Mariani Packing Co.", { fetchImpl: makeSecFeedStub("<html>Server Error</html>") });
+  check(
+    "không đọc được phản hồi thì KHÔNG được báo 'không tìm thấy hồ sơ'",
+    unreadable.reason.includes("định dạng không nhận ra") && !unreadable.reason.includes("không tìm thấy hồ sơ"),
+    unreadable.reason,
+  );
+
+  const trulyNone = await api.lookupSecEdgar("Mariani Packing Co.", { fetchImpl: makeSecFeedStub(noMatch) });
+  check("sổ nói không có thì báo đúng câu 'không tìm thấy hồ sơ theo tên này'", trulyNone.reason === "không tìm thấy hồ sơ theo tên này", trulyNone.reason);
+
+  const foundFeed = await api.lookupSecEdgar("Apple Inc.", { fetchImpl: makeSecFeedStub(feedCompanyInfo) });
+  check(
+    "tìm thấy thì đi tiếp bằng đúng mã CIK vừa đọc, không phải đoán",
+    (foundFeed.reason === undefined || !foundFeed.reason) && foundFeed.finding?.companyNumber === "CIK 0000320193",
+    JSON.stringify(foundFeed.finding?.companyNumber ?? foundFeed.reason),
   );
 
   section("SEC EDGAR: User-Agent phải kèm cách liên hệ");
