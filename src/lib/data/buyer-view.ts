@@ -50,6 +50,11 @@ export type BuyerContactRow = {
   requiresOverride: boolean;
   sourceUrl: string | null;
   lastSeenAt: string | null;
+  /** Khoá để nối với `contact_whatsapp_links`; chỉ có khi đọc từ database. */
+  channelId?: string | null;
+  /** Chỉ có khi số đã được kiểm là có WhatsApp. Chưa kiểm thì không có gì. */
+  whatsappUrl?: string | null;
+  whatsappCheckedBy?: string | null;
 };
 
 export type BuyerListPayload = {
@@ -90,10 +95,26 @@ export type BuyerContactDbRow = {
   requires_override: boolean | null;
   source_url: string | null;
   last_seen_at: string | null;
+  channel_id?: string | null;
 };
 
 export const BUYER_SUMMARY_COLUMNS =
   "buyer_profile_id, display_name, country, region, website, industry, named_people, verified_channels, last_signal_at, last_contact_seen_at";
+
+/**
+ * Số đã được một dịch vụ kiểm là có WhatsApp (view `contact_whatsapp_links`,
+ * migration 008). Chỉ những dòng có lần kiểm mới nằm trong view này, nên UI
+ * không phải tự quyết định gì thêm.
+ */
+export type WhatsAppLinkRow = {
+  channel_id: string;
+  buyer_profile_id: string;
+  phone_e164: string | null;
+  whatsapp_url: string;
+  whatsapp_checked_by: string | null;
+};
+
+export const WHATSAPP_LINK_COLUMNS = "channel_id, buyer_profile_id, phone_e164, whatsapp_url, whatsapp_checked_by";
 
 export const BUYER_CONTACT_COLUMNS =
   "buyer_profile_id, buyer_name, country, website, full_name, job_title, department, channel_type, value, confidence_label, identity_match, deliverability, is_verified, requires_override, source_url, last_seen_at";
@@ -102,6 +123,7 @@ export function toBuyerList(
   summaryRows: BuyerSummaryDbRow[],
   contactRows: BuyerContactDbRow[],
   withheldByBuyer: Map<string, number>,
+  whatsappByChannel: Map<string, { url: string; checkedBy: string | null }> = new Map(),
 ): BuyerListPayload {
   const contacts: BuyerContactRow[] = contactRows.map((row) => ({
     buyerId: row.buyer_profile_id,
@@ -120,6 +142,9 @@ export function toBuyerList(
     requiresOverride: Boolean(row.requires_override),
     sourceUrl: row.source_url,
     lastSeenAt: row.last_seen_at,
+    channelId: row.channel_id ?? null,
+    whatsappUrl: row.channel_id ? (whatsappByChannel.get(row.channel_id)?.url ?? null) : null,
+    whatsappCheckedBy: row.channel_id ? (whatsappByChannel.get(row.channel_id)?.checkedBy ?? null) : null,
   }));
 
   const exportableByBuyer = new Map<string, number>();

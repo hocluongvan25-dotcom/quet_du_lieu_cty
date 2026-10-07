@@ -21,6 +21,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { isE164 } from "./phone";
 import type { ConnectorResult, FoundChannel } from "./types";
 
 // --------------------------------------------------------------- từ vựng DB --
@@ -56,6 +57,11 @@ export type BatchChannel = {
   certainty: "confirmed" | "probable";
   source_url: string;
   evidence_snippet: string;
+  /**
+   * Số đã chuẩn hoá E.164, hoặc null khi chưa biết quốc gia (xem phone.ts).
+   * `value` vẫn giữ nguyên số như đã công bố.
+   */
+  phone_e164: string | null;
   /** Vị trí trong `people` khi kênh được công bố ngay cạnh tên một người. */
   personIndex: number | null;
 };
@@ -99,7 +105,7 @@ export type SaveResult =
   | {
       ok: true;
       buyerProfileId: string;
-      channels: { inserted: number; refreshed: number; skipped: number };
+      channels: { inserted: number; refreshed: number; skipped: number; phonesNormalized: number };
       people: { inserted: number; refreshed: number };
       routes: { inserted: number; refreshed: number };
       /** Luôn 0: connector không sinh email theo pattern. */
@@ -252,8 +258,15 @@ export function buildBuyerWriteBatch(
     const personName = channel.personName ? keyOf(channel.personName) : "";
     const personIndex = personName && personIndexByName.has(personName) ? personIndexByName.get(personName)! : null;
 
+    // E.164 chỉ giữ khi đúng dạng; một chuỗi méo không được đi vào cột có ràng buộc.
+    const e164 = channel.e164 && isE164(channel.e164) ? channel.e164 : null;
+    if (channel.e164 && !e164) {
+      skipped.push({ value: channel.e164, reason: "số chuẩn hoá không đúng dạng E.164" });
+    }
+
     channels.push({
       channel_type: channelType,
+      phone_e164: channelType === "phone" ? e164 : null,
       value,
       // Kênh công bố ngay cạnh tên một người là kênh của người đó — nhưng chỉ
       // khi người đó có trong `people`; nếu không thì hạ về mức công ty chung,
@@ -407,6 +420,9 @@ export async function saveBuyerDiscovery(store: BuyerStore, batch: BuyerWriteBat
         identity_match: channel.identity_match,
         source_url: channel.source_url,
         evidence_snippet: channel.evidence_snippet,
+        phone_e164: channel.phone_e164,
+        // `has_whatsapp` cố ý không được set: connector không kiểm WhatsApp, nên
+        // để NULL = "chưa kiểm". Đặt false ở đây sẽ là nói dối rằng đã kiểm rồi.
         // Connector chỉ quan sát. Việc gắn giá trị với đúng người là bước khác.
         is_verified: false,
         is_public: true,
@@ -444,7 +460,13 @@ export async function saveBuyerDiscovery(store: BuyerStore, batch: BuyerWriteBat
   return {
     ok: true,
     buyerProfileId,
-    channels: { inserted: channelsToInsert.length, refreshed: channelsToRefresh.length, skipped: batch.skipped.length },
+    channels: {
+      inserted: channelsToInsert.length,
+      refreshed: channelsToRefresh.length,
+      skipped: batch.skipped.length,
+      /** Số điện thoại đã chuẩn hoá được về E.164 trong lần ghi này. */
+      phonesNormalized: batch.channels.filter((channel) => channel.phone_e164 !== null).length,
+    },
     people: { inserted: peopleToInsert.length, refreshed: refreshedPeople.length },
     routes: { inserted: routesToInsert.length, refreshed: batch.routes.length - routesToInsert.length },
     // Không có nhánh nào ghi vào contact_candidates: connector không đoán email.

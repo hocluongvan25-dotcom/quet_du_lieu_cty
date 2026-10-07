@@ -13,8 +13,7 @@ import {
   Phone,
   Search,
   UserRound,
-  Users,
-} from "lucide-react";
+  Users, MessageCircle } from "lucide-react";
 
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { filterBuyerList, type BuyerContactRow, type BuyerListRow } from "@/lib/data/buyer-view";
@@ -29,7 +28,7 @@ const CHANNEL_ICON: Record<string, typeof Mail> = {
   email: Mail,
   phone: Phone,
   linkedin: UserRound,
-  whatsapp: Phone,
+  whatsapp: MessageCircle,
   form: Globe2,
 };
 
@@ -248,6 +247,20 @@ export function BuyersPage({
                                         <span className={`rounded-full px-1.5 py-0.5 text-[8px] font-bold ${contact.isVerified ? "bg-[#EAF8F3] text-[#168466]" : "bg-[#FFF4E5] text-[#C37B18]"}`}>
                                           {contact.confidenceLabel}
                                         </span>
+                                        {/* Chỉ hiện khi một dịch vụ đã kiểm số này có WhatsApp.
+                                            Chưa kiểm thì không có nút, không có suy đoán. */}
+                                        {contact.whatsappUrl ? (
+                                          <a
+                                            href={contact.whatsappUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-flex items-center gap-1 text-[9px] font-bold text-[#1E9E57] hover:text-[#157A42]"
+                                            title={contact.whatsappCheckedBy ? `${isVietnamese ? "Kiểm bởi" : "Checked by"} ${contact.whatsappCheckedBy}` : undefined}
+                                            onClick={(event) => event.stopPropagation()}
+                                          >
+                                            <MessageCircle size={10} /> {isVietnamese ? "Nhắn WhatsApp" : "WhatsApp"}
+                                          </a>
+                                        ) : null}
                                         {contact.sourceUrl ? (
                                           <a
                                             href={contact.sourceUrl}

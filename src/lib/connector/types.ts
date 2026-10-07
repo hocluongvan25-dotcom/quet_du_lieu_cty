@@ -18,6 +18,13 @@ export type FoundChannel = {
   policy: ChannelPolicy;
   sourceUrl: string;
   evidenceSnippet: string;
+  /**
+   * Số điện thoại đã chuẩn hoá về E.164 — chỉ có khi biết quốc gia của công ty.
+   * `value` vẫn giữ nguyên như đã công bố; đây là trường thứ hai, không thay thế.
+   */
+  e164?: string | null;
+  /** Khi `e164` là null: vì sao chưa chuẩn hoá được (để người kiểm đọc, không hiện cho người dùng). */
+  e164Reason?: string;
   /** Có khi giá trị được công bố ngay cạnh tên một người. */
   personName?: string;
   personTitle?: string;

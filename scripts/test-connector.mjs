@@ -90,8 +90,9 @@ import { assertPublicUrl, isBlockedAddress, UnsafeUrlError } from "@/lib/connect
 import { pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString } from "@/lib/connector/pdf";
 import { extractFromLines } from "@/lib/connector/extract";
 import { buildBuyerWriteBatch } from "@/lib/connector/persist";
+import { toE164, whatsappLink, isE164, resolveCountry } from "@/lib/connector/phone";
 
-export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch };
+export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry };
 `;
   await mkdir(workDir, { recursive: true });
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
@@ -350,6 +351,39 @@ async function runChecks(api, files) {
 
   const blockedFetch = await api.runConnector("169.254.169.254", { fetchImpl: mockFetch, delayMs: 0, maxPages: 2, log: () => {} });
   check("connector từ chối IP metadata", blockedFetch.pages.every((page) => page.status === "skipped" || page.status === "blocked" || page.status === "error"), JSON.stringify(blockedFetch.pages));
+
+  section("số điện thoại → E.164");
+  const vn = api.toE164("(028) 3822 1234", "Vietnam");
+  check("số nội địa + biết quốc gia → ghép mã quốc gia", vn.ok && vn.value === "+842838221234", JSON.stringify(vn));
+  const vnMobile = api.toE164("0912 345 678", "Việt Nam");
+  check("bỏ số 0 đầu của số di động Việt Nam", vnMobile.ok && vnMobile.value === "+84912345678", JSON.stringify(vnMobile));
+  const us = api.toE164("707-452-2800", "United States");
+  check("số Mỹ không có số 0 đầu", us.ok && us.value === "+17074522800", JSON.stringify(us));
+  const uk = api.toE164("020 7946 0000", "UK");
+  check("UK: bỏ 0 đầu, ghép +44", uk.ok && uk.value === "+442079460000", JSON.stringify(uk));
+  const it = api.toE164("06 1234 5678", "Italy");
+  check("Ý giữ số 0 đầu (đúng thông lệ nước này)", it.ok && it.value === "+390612345678", JSON.stringify(it));
+  const already = api.toE164("+84 28 3822 1234");
+  check("số đã có + thì chỉ làm sạch", already.ok && already.value === "+842838221234", JSON.stringify(already));
+  const zeroZero = api.toE164("00 84 28 3822 1234");
+  check("lối viết 00 đổi thành +", zeroZero.ok && zeroZero.value === "+842838221234", JSON.stringify(zeroZero));
+  const noCountry = api.toE164("707-452-2800");
+  check("KHÔNG tự thêm mã quốc gia khi chưa biết quốc gia", noCountry.ok === false && noCountry.reason.includes("quốc gia"), JSON.stringify(noCountry));
+  const oddCountry = api.toE164("707-452-2800", "Atlantis");
+  check("quốc gia không nhận ra thì cũng không đoán", oddCountry.ok === false && oddCountry.reason.includes("Atlantis"), JSON.stringify(oddCountry));
+  const tooShort = api.toE164("12345", "United States");
+  check("chuỗi quá ngắn bị từ chối", tooShort.ok === false);
+  check("nhận mã ISO hai chữ và tên không dấu", api.resolveCountry("vn")?.iso2 === "VN" && api.resolveCountry("viet nam")?.iso2 === "VN");
+  check("isE164 từ chối số thiếu dấu + và số quá dài", !api.isE164("84912345678") && !api.isE164("+1234567890123456"));
+  check("whatsappLink chỉ dựng từ E.164", api.whatsappLink("+84912345678") === "https://wa.me/84912345678" && api.whatsappLink("0912345678") === null && api.whatsappLink(null) === null);
+
+  const withCountry = api.extractFromPage({ url: "https://mariani.com/pages/contact-us", html: files["contact-us.html"], country: "United States" });
+  const phoneWithCountry = withCountry.channels.find((channel) => channel.type === "phone" && channel.value === "7074522800");
+  check("trang có quốc gia → kênh điện thoại mang E.164", phoneWithCountry?.e164 === "+17074522800", phoneWithCountry?.e164);
+  check("và giá trị hiển thị vẫn nguyên như đã công bố", phoneWithCountry?.value === "7074522800");
+  const withoutCountry = api.extractFromPage({ url: "https://mariani.com/pages/contact-us", html: files["contact-us.html"] });
+  const phoneWithout = withoutCountry.channels.find((channel) => channel.type === "phone" && channel.value === "7074522800");
+  check("trang không có quốc gia → e164 rỗng, kèm lý do", phoneWithout?.e164 === null && String(phoneWithout?.e164Reason).includes("quốc gia"), phoneWithout?.e164Reason);
 
   section("đầu vào sai");
   const bad = await api.runConnector("", { fetchImpl: mockFetch, delayMs: 0, guard: noGuard, log: () => {} }).then(() => false).catch(() => true);

@@ -125,7 +125,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await runConnector(seed, { maxPages, delayMs: 250, targets });
+    const result = await runConnector(seed, { maxPages, delayMs: 250, targets, country });
 
     const attempted = result.pages.filter((page) => page.status !== "skipped");
     if (attempted.length > 0 && result.channels.length === 0 && attempted.every((page) => page.status === "error" || page.status === "blocked")) {

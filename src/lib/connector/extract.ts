@@ -7,6 +7,7 @@
  */
 
 import { decodeEntities, htmlToLines, registrableDomain } from "./html";
+import { toE164 } from "./phone";
 import { findRequirements } from "@/lib/requirements";
 import type { Certainty, ChannelPolicy, ConnectorNote, FoundChannel, FoundPerson, IdentityMatch, PageExtraction, TargetFamily } from "./types";
 
@@ -111,6 +112,8 @@ export type ExtractInput = {
   url: string;
   html: string;
   targets?: TargetFamily[];
+  /** Quốc gia của công ty, để chuẩn hoá số nội địa sang E.164. */
+  country?: string | null;
 };
 
 export type ExtractLinesInput = {
@@ -121,6 +124,8 @@ export type ExtractLinesInput = {
   /** Chỉ dùng cho HTML: mailto:, link mạng xã hội, `<form>`, widget chat. */
   html?: string;
   targets?: TargetFamily[];
+  /** Quốc gia của công ty, để chuẩn hoá số nội địa sang E.164. */
+  country?: string | null;
 };
 
 /**
@@ -128,7 +133,7 @@ export type ExtractLinesInput = {
  * Phần chỉ có ở HTML (mailto:, link mạng xã hội, `<form>`, widget chat) tự bỏ qua
  * khi nguồn là PDF.
  */
-export function extractFromLines({ url, lines, kind = "html", html: rawHtml = "", targets = ["email", "phone", "whatsapp", "linkedin", "form"] }: ExtractLinesInput): PageExtraction {
+export function extractFromLines({ url, lines, kind = "html", html: rawHtml = "", targets = ["email", "phone", "whatsapp", "linkedin", "form"], country = null }: ExtractLinesInput): PageExtraction {
   const html = kind === "html" ? rawHtml : "";
   const text = lines.join(" | ");
   const host = (() => {
@@ -260,9 +265,15 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
     }
 
     const isFax = /fax/i.test(lines[match.line] ?? "");
+    // Số quốc tế thì chuẩn hoá được ngay; số nội địa chỉ chuẩn hoá được khi biết
+    // quốc gia. Không biết thì giữ nguyên số như đã công bố và ghi lại lý do —
+    // không tự thêm mã quốc gia (xem phone.ts).
+    const normalized = toE164(match.raw, country);
     push({
       type: "phone",
       value: match.value,
+      e164: normalized.ok ? normalized.value : null,
+      e164Reason: normalized.ok ? undefined : normalized.reason,
       // Fax là dữ liệu thật trên trang, nhưng không phải kênh để liên hệ.
       label: isFax ? "Fax công bố" : "Điện thoại công bố",
       identityMatch: "company_general",
@@ -379,8 +390,8 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
   return { channels, people, requirements, notes };
 }
 
-export function extractFromPage({ url, html, targets = ["email", "phone", "whatsapp", "linkedin", "form"] }: ExtractInput): PageExtraction {
-  return extractFromLines({ url, lines: htmlToLines(html), kind: "html", html, targets });
+export function extractFromPage({ url, html, targets = ["email", "phone", "whatsapp", "linkedin", "form"], country = null }: ExtractInput): PageExtraction {
+  return extractFromLines({ url, lines: htmlToLines(html), kind: "html", html, targets, country });
 }
 
 export function isLoginWall(url: string): boolean {

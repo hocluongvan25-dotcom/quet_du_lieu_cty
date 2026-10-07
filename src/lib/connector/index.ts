@@ -29,6 +29,11 @@ export type RunConnectorOptions = DiscoveryOptions & {
   /** Nghỉ giữa các lần tải để không ép máy chủ của họ. */
   delayMs?: number;
   maxPages?: number;
+  /**
+   * Quốc gia của công ty (mã ISO hoặc tên). Có thì số nội địa được chuẩn hoá
+   * sang E.164; không có thì số giữ nguyên như đã công bố. Xem phone.ts.
+   */
+  country?: string | null;
 };
 
 const DEFAULT_TARGETS: TargetFamily[] = ["email", "phone", "whatsapp", "linkedin", "form"];
@@ -42,6 +47,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
   const log = options.log ?? (() => {});
   const targets = options.targets ?? DEFAULT_TARGETS;
   const delayMs = options.delayMs ?? 300;
+  const country = options.country ?? null;
 
   if (!seedUrl) {
     throw new Error(`Không đọc được tên miền từ "${seedInput}"`);
@@ -87,7 +93,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
       continue;
     }
 
-    const extracted = extractFromPage({ url: outcome.finalUrl, html: outcome.body, targets });
+    const extracted = extractFromPage({ url: outcome.finalUrl, html: outcome.body, targets, country });
 
     extracted.channels.forEach((channel) => {
       const key = `${channel.type}:${channel.value.toLowerCase()}`;
@@ -143,7 +149,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
       continue;
     }
 
-    const extracted = extractFromLines({ url: outcome.finalUrl, lines: pdf.lines, kind: "pdf", targets });
+    const extracted = extractFromLines({ url: outcome.finalUrl, lines: pdf.lines, kind: "pdf", targets, country });
 
     extracted.channels.forEach((channel) => {
       const key = `${channel.type}:${channel.value.toLowerCase()}`;

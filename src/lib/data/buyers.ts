@@ -6,10 +6,12 @@ import { fetchWorkspaceAccount } from "./workspace";
 import {
   BUYER_CONTACT_COLUMNS,
   BUYER_SUMMARY_COLUMNS,
+  WHATSAPP_LINK_COLUMNS,
   demoBuyerList,
   toBuyerList,
   type BuyerContactDbRow,
   type BuyerListPayload,
+  type WhatsAppLinkRow,
   type BuyerSummaryDbRow,
 } from "./buyer-view";
 
@@ -66,6 +68,14 @@ export const loadBuyerList = cache(async (): Promise<BuyerListResult> => {
 
     if (contactError) throw new Error(contactError.message);
 
+    // Số đã kiểm là có WhatsApp (008). View rỗng khi chưa cắm dịch vụ kiểm, và
+    // đó là trạng thái đúng: không có gì để hiện thì không hiện gì.
+    const { data: whatsappData } = await supabase.from("contact_whatsapp_links").select(WHATSAPP_LINK_COLUMNS).limit(2000);
+    const whatsappByChannel = new Map<string, { url: string; checkedBy: string | null }>();
+    ((whatsappData ?? []) as unknown as WhatsAppLinkRow[]).forEach((row) => {
+      whatsappByChannel.set(row.channel_id, { url: row.whatsapp_url, checkedBy: row.whatsapp_checked_by });
+    });
+
     const { data: withheldData, error: withheldError } = await supabase
       .from("contact_export_policy")
       .select("buyer_profile_id")
@@ -81,7 +91,7 @@ export const loadBuyerList = cache(async (): Promise<BuyerListResult> => {
 
     return {
       state: "live",
-      payload: toBuyerList(summaryRows, (contactData ?? []) as unknown as BuyerContactDbRow[], withheldByBuyer),
+      payload: toBuyerList(summaryRows, (contactData ?? []) as unknown as BuyerContactDbRow[], withheldByBuyer, whatsappByChannel),
     };
   } catch {
     return { state: "demo", payload: demoBuyerList() };

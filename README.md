@@ -71,7 +71,7 @@ The app keeps working without `.env.local`; it stays in demo mode.
 ## Connect Supabase
 
 1. Create a Supabase project.
-2. Run every file in `supabase/migrations/` (seven, in order) in its SQL editor, or use the Supabase CLI:
+2. Run every file in `supabase/migrations/` (eight, in order) in its SQL editor, or use the Supabase CLI:
 
    ```bash
    supabase link --project-ref YOUR_PROJECT_REF
@@ -211,7 +211,7 @@ A line only becomes an item when it names one of those and either carries requir
 
 ```bash
 npm run requirements:test   # 24 checks: no fabrication, verbatim evidence, sources, PDF, no advice
-npm run persist:test      # 54 checks: rows built from real findings, written into a real Postgres, read back through the app's views, then verified and exported
+npm run persist:test      # 63 checks: rows built from real findings, written into a real Postgres, read back through the app's views, verified, exported, WhatsApp-checked
 ```
 
 ### Connector: public sources to sourced channels
@@ -239,7 +239,7 @@ npm run connector:run mariani.com -- --max-pages 8 --max-documents 4
 | `persist.ts` | Builds the database rows (pure) and writes them through a small store port: `buyer_profiles`, `decision_makers`, `contact_channels`, `buyer_routes` |
 
 ```bash
-npm run connector:test    # 104 checks on real HTML and PDF fixtures, no network needed
+npm run connector:test    # 120 checks on real HTML and PDF fixtures, no network needed
 npm run connector:run mariani.com            # real run, human readable
 npm run connector:run mariani.com -- --json  # full JSON
 ```
@@ -267,6 +267,12 @@ Migration 007 makes evidence a column-level rule rather than a convention: a `co
 `country` is required and is never inferred from the domain suffix: missing it returns `persisted: false` with that reason instead of storing half a row. Writes go through the service role — migrations 005/006 revoke insert/update on the buyer tables from `authenticated`, so the browser cannot write buyer data — and `organization_id` always comes from the session, never from the request body.
 
 Re-running the same domain refreshes `last_seen_at` instead of duplicating channels, people or routes.
+
+### Phone numbers and WhatsApp
+
+Phone numbers are normalised to **E.164** in `src/lib/connector/phone.ts`, in a second field: `value` keeps the number exactly as published, `phone_e164` holds the normalised one. A number that already carries `+` (or is written the `00` way) always normalises. A national-format number normalises **only when the company's country is known** — the country's dialling code is prepended and the trunk prefix dropped according to that country's convention (`0` for most, none for the US/Canada/Italy/Spain, `8` for Russia). Without a known country the number is left as published and `phone_e164` stays empty: an E.164 value is what opens `wa.me/<number>`, and a wrong country code does not just look wrong, it opens a chat with a stranger.
+
+`has_whatsapp` is a **three-state** boolean because "not checked" is not "checked, and no": `null` on everything the connector writes, `true` only after a service checked it, `false` only when a service said no. A `true` must name the service and must have an E.164 number — enforced by constraints in migration 008. `public.contact_whatsapp_links` exposes the `wa.me` link for checked numbers, and the buyer list shows a "Nhắn WhatsApp" button for exactly those rows; unchecked numbers show nothing. See `docs/backlog.md` for what is still missing (the checking service) and `docs/buyer-discovery-spec.md` §19 for the rules.
 
 ### Retention and the artifact bucket
 

@@ -8,7 +8,7 @@
  *
  *  1. Dựng dữ liệu (hàm thuần): thiếu gì thì từ chối, thừa gì thì bỏ, và
  *     không bao giờ sinh email theo pattern.
- *  2. Ghi thật vào Postgres trong tiến trình (PGlite) với đúng 7 migration,
+ *  2. Ghi thật vào Postgres trong tiến trình (PGlite) với đúng 8 migration,
  *     rồi đọc lại qua chính các view mà ứng dụng dùng
  *     (`contact_export_policy`, `buyer_outreach_summary`, `outreach_ready_contacts`).
  *
@@ -58,6 +58,17 @@ function sampleResult(overrides = {}) {
     sourceUrl: "https://acme.example/procurement",
     evidenceSnippet: "Supplier enquiries: procurement@acme.example",
   };
+  const switchboard = {
+    type: "phone",
+    value: "707-452-2800",
+    e164: "+17074522800",
+    label: "Điện thoại công bố",
+    identityMatch: "company_general",
+    certainty: "confirmed",
+    policy: "outreach_ready",
+    sourceUrl: "https://acme.example/contact",
+    evidenceSnippet: "Phone: 707-452-2800",
+  };
   const personal = {
     type: "email",
     value: "dana.whitfield@acme.example",
@@ -75,12 +86,12 @@ function sampleResult(overrides = {}) {
     seedUrl: "https://acme.example",
     domain: "acme.example",
     pages: [
-      { url: "https://acme.example/procurement", status: 200, channels: 2 },
+      { url: "https://acme.example/procurement", status: 200, channels: 3 },
       { url: "https://acme.example/become-a-supplier", status: 200, channels: 0 },
       { url: "https://acme.example/cart", status: 404, channels: 0 },
       { url: "https://acme.example/robots.txt", status: "blocked", channels: 0 },
     ],
-    channels: [email, personal],
+    channels: [email, personal, switchboard],
     people: [
       {
         id: "person-dana-whitfield",
@@ -205,8 +216,8 @@ function pgliteStore(db) {
         await db.query(
           `insert into public.contact_channels
              (organization_id, buyer_profile_id, market_source_id, decision_maker_id, channel_type, value, provenance,
-              certainty, discovered_by, identity_match, source_url, evidence_snippet, is_verified, is_public)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+              certainty, discovered_by, identity_match, source_url, evidence_snippet, phone_e164, is_verified, is_public)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
           [
             row.organization_id,
             row.buyer_profile_id,
@@ -220,6 +231,7 @@ function pgliteStore(db) {
             row.identity_match,
             row.source_url,
             row.evidence_snippet,
+            row.phone_e164 ?? null,
             row.is_verified,
             row.is_public,
           ],
@@ -373,9 +385,9 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   check("mỗi đường vào đều có nguồn", batch.routes.every((route) => route.source_url.startsWith("http")));
 
   // ------------------------------------------------- 2. ghi vào Postgres thật --
-  section("ghi vào Postgres thật (PGlite, đủ 7 migration)");
+  section("ghi vào Postgres thật (PGlite, đủ 8 migration)");
   const { db, migrationCount } = await bootDatabase();
-  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 7, String(migrationCount));
+  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 8, String(migrationCount));
 
   await db.query(
     `insert into auth.users (id, email, raw_user_meta_data)
@@ -393,7 +405,7 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   const buyerRow = (await db.query("select id, display_name, country, domain, website from public.buyer_profiles where organization_id = $1", [realOrgId])).rows[0];
   check("buyer_profiles có dòng với tên miền làm khoá", buyerRow?.domain === "acme.example" && buyerRow?.country === "United States");
   const channelCount = (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerRow.id])).rows[0].n;
-  check("contact_channels có đủ 2 kênh", channelCount === 2, String(channelCount));
+  check("contact_channels có đủ 3 kênh", channelCount === 3, String(channelCount));
   check(
     "mọi kênh đều có source_url + câu chữ bằng chứng",
     (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1 and (source_url is null or btrim(coalesce(evidence_snippet, '')) = '')", [buyerRow.id])).rows[0].n === 0,
@@ -426,19 +438,19 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
 
   // Danh sách buyer: dòng vừa ghi phải đọc được qua view của UI.
   const summary = (await db.query("select display_name, country, reachable_channels, named_people, last_contact_seen_at from public.buyer_outreach_summary where buyer_profile_id = $1", [buyerRow.id])).rows[0];
-  check("buyer_outreach_summary hiện công ty vừa ghi", summary?.reachable_channels === 2 && summary?.named_people === 1, JSON.stringify(summary));
+  check("buyer_outreach_summary hiện công ty vừa ghi", summary?.reachable_channels === 3 && summary?.named_people === 1, JSON.stringify(summary));
   const contacts = (await db.query("select count(*)::int as n from public.outreach_ready_contacts where buyer_profile_id = $1", [buyerRow.id])).rows[0].n;
-  check("outreach_ready_contacts liệt kê 2 dòng (CSV)", contacts === 2, String(contacts));
+  check("outreach_ready_contacts liệt kê 3 dòng (CSV)", contacts === 3, String(contacts));
   const withSource = (await db.query("select count(*)::int as n from public.outreach_ready_contacts where buyer_profile_id = $1 and source_url is not null", [buyerRow.id])).rows[0].n;
-  check("mọi dòng trong CSV đều có nguồn", withSource === 2);
+  check("mọi dòng trong CSV đều có nguồn", withSource === 3);
 
   // Chạy lại: không nhân đôi.
   const second = await api.saveBuyerDiscovery(store, { ...batch, organizationId: realOrgId });
   check("chạy lần hai vẫn ok", second.ok === true);
-  check("lần hai chỉ làm mới, không thêm kênh", second.channels.inserted === 0 && second.channels.refreshed === 2, JSON.stringify(second.channels));
+  check("lần hai chỉ làm mới, không thêm kênh", second.channels.inserted === 0 && second.channels.refreshed === 3, JSON.stringify(second.channels));
   check("lần hai không thêm người", second.people.inserted === 0 && second.people.refreshed === 1);
   check("lần hai không thêm đường vào", second.routes.inserted === 0 && second.routes.refreshed === 3);
-  check("tổng số kênh vẫn là 2", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 2);
+  check("tổng số kênh vẫn là 3", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 3);
   check("last_seen_at được làm mới", (await db.query("select bool_and(last_seen_at > created_at) as ok from public.contact_channels where buyer_profile_id = $1", [buyerRow.id])).rows[0].ok === true);
 
   // Ranh giới tenant: người của workspace khác không thấy gì.
@@ -452,6 +464,54 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   check("workspace khác không thấy buyer này", (await db.query("select count(*)::int as n from public.buyer_outreach_summary where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 0);
   check("workspace khác không thấy kênh", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 0);
   await db.query("reset role");
+
+  // ------------------------------------- 2b. E.164 + WhatsApp (008) ----------
+  section("E.164 và WhatsApp");
+  const phoneRow = (
+    await db.query("select value, phone_e164, has_whatsapp from public.contact_channels where buyer_profile_id = $1 and channel_type = 'phone'", [buyerRow.id])
+  ).rows[0];
+  check("số đã chuẩn hoá E.164 được lưu đúng", phoneRow?.phone_e164 === "+17074522800", JSON.stringify(phoneRow));
+  check("giá trị hiển thị vẫn là số như đã công bố", phoneRow?.value === "707-452-2800", phoneRow?.value);
+  check("chưa kiểm WhatsApp thì has_whatsapp là NULL, không phải false", phoneRow?.has_whatsapp === null);
+  check("xác nhận trong batch có đếm số điện thoại đã chuẩn hoá", typeof second.channels.phonesNormalized === "number" && second.channels.phonesNormalized === 1, JSON.stringify(second.channels));
+
+  check("view WhatsApp trống khi chưa ai kiểm", (await db.query("select count(*)::int as n from public.contact_whatsapp_links where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 0);
+
+  // Mô phỏng kết quả của dịch vụ kiểm WhatsApp (việc sẽ cắm ở phase sau).
+  const whatsappChecked = await db.query(
+    "update public.contact_channels set has_whatsapp = true, whatsapp_checked_at = now(), whatsapp_checked_by = 'whatsapp-check-api' where buyer_profile_id = $1 and channel_type = 'phone' returning id",
+    [buyerRow.id],
+  );
+  const link = (
+    await db.query("select phone_e164, whatsapp_url, whatsapp_checked_by from public.contact_whatsapp_links where channel_id = $1", [whatsappChecked.rows[0].id])
+  ).rows[0];
+  check("kiểm xong thì view trả link wa.me dựng từ E.164", link?.whatsapp_url === "https://wa.me/17074522800", JSON.stringify(link));
+  check("view ghi rõ dịch vụ nào đã kiểm", link?.whatsapp_checked_by === "whatsapp-check-api");
+
+  let whatsappNoProvider = "";
+  try {
+    await db.query(
+      "update public.contact_channels set has_whatsapp = true, whatsapp_checked_by = null where buyer_profile_id = $1 and channel_type = 'phone'",
+      [buyerRow.id],
+    );
+  } catch (error) {
+    whatsappNoProvider = error.message;
+  }
+  check("không thể nói 'có WhatsApp' mà không nêu dịch vụ kiểm", whatsappNoProvider.includes("contact_channels_whatsapp_needs_provider"), whatsappNoProvider);
+
+  let e164OnEmail = "";
+  try {
+    await db.query(
+      "update public.contact_channels set phone_e164 = '+84912345678' where buyer_profile_id = $1 and channel_type = 'email'",
+      [buyerRow.id],
+    );
+  } catch (error) {
+    e164OnEmail = error.message;
+  }
+  check("cột E.164 chỉ dành cho số điện thoại", e164OnEmail.includes("contact_channels_e164_is_phone"), e164OnEmail);
+
+  // Trả lại trạng thái "chưa kiểm" để các phép đếm phía sau đo đúng.
+  await db.query("update public.contact_channels set has_whatsapp = null, whatsapp_checked_at = null, whatsapp_checked_by = null where buyer_profile_id = $1", [buyerRow.id]);
 
   // ------------------------------------------- 3. lần kiểm tra thứ hai (007) --
   section("xác minh kênh (007)");
@@ -515,7 +575,7 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
 
   check(
     "xác minh và kiểm mailbox không tạo thêm dòng nào",
-    (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 2,
+    (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 3,
   );
 
   await db.close();

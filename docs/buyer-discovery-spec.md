@@ -545,3 +545,45 @@ Chuỗi trạng thái đầy đủ, kiểm trong `npm run persist:test`:
 
 - `npm run db:verify` — 7 migration, thêm 7 check: dòng `confirmed` thiếu câu trích dẫn bị từ chối, `evidence_url` phản chiếu đúng trang đã đọc, `/in/` đứng một mình bị từ chối, hàm xác minh nhận dòng đủ điều kiện và từ chối phỏng đoán lẫn hộp thư đã biết là hỏng, và `authenticated` không gọi được hàm đó.
 - `npm run persist:test` — 54 check, gồm cả chuỗi ba trạng thái ở bảng trên và hai ràng buộc mới bị database từ chối thi hành.
+
+---
+
+## 19. Số điện thoại chuẩn E.164 và WhatsApp (07/10/2026)
+
+WhatsApp là kênh chính của khách B2B xuất nhập khẩu, nên số điện thoại phải dùng được, không chỉ để đọc. Yêu cầu gồm ba phần; hai phần đã chạy, phần thứ ba chờ dịch vụ kiểm (xem [`docs/backlog.md`](./backlog.md)).
+
+### E.164 — làm được, nhưng không phải bằng cách đoán
+
+`src/lib/connector/phone.ts` chuẩn hoá số theo ba tình huống:
+
+| Trên trang | Kết quả | Ví dụ |
+| --- | --- | --- |
+| Đã có `+` | Làm sạch, giữ nguyên | `+84 28 3822 1234` → `+842838221234` |
+| Viết lối `00` | Đổi thành `+` | `00 84 28 3822 1234` → `+842838221234` |
+| Số nội địa, **biết quốc gia** | Bỏ số đầu theo thông lệ nước đó, ghép mã quốc gia | `(028) 3822 1234` + Việt Nam → `+842838221234` |
+| Số nội địa, **chưa biết quốc gia** | **Không** thêm mã quốc gia; ghi lý do | `707-452-2800` → để trống `phone_e164` |
+
+Bảng mã quốc gia phủ ~55 nước (thị trường xuất khẩu chính + láng giềng Việt Nam), kèm số đầu phải bỏ: `0` với phần lớn các nước, **không có** với Mỹ/Canada/Ý/Tây Ban Nha, `8` với Nga. Ý là ví dụ đáng nhớ: `06 …` **giữ** số 0 (`+3906…`), không cắt như `+44`/`+49`.
+
+**Vì sao không nới quy tắc "không tự thêm mã quốc gia":** số E.164 là thứ mở `wa.me/<số>`. Một mã quốc gia sai không chỉ là dữ liệu xấu — nó mở cuộc trò chuyện với một người lạ. Vì vậy `value` (số như đã công bố) và `phone_e164` (số chuẩn hoá) là hai trường riêng, và số nội địa không rõ quốc gia thì để trống trường thứ hai.
+
+### `has_whatsapp`: boolean ba trạng thái
+
+| Giá trị | Nghĩa |
+| --- | --- |
+| `null` | **Chưa ai kiểm.** Mọi dòng connector ghi ra đều ở trạng thái này. |
+| `true` | Đã kiểm bằng một dịch vụ và **có** WhatsApp. |
+| `false` | Đã kiểm và **không** có. |
+
+Không mặc định `false`, vì "chưa kiểm" khác "đã kiểm và không có". Database bắt ba điều: `true` phải có `whatsapp_checked_at`, phải nêu `whatsapp_checked_by`, và phải có `phone_e164` (không mở nút chat bằng số chưa biết mã quốc gia). `phone_e164` chỉ dành cho `channel_type = 'phone'`.
+
+Một dòng `channel_type = 'whatsapp'` là **kênh công bố sẵn** (link `wa.me` trên trang) — khác hẳn trường `has_whatsapp` (kết quả của một lần kiểm). Cả hai đều có chỗ và không lẫn nhau.
+
+### Nút WhatsApp trên UI
+
+`public.contact_whatsapp_links` (008) chỉ trả những số **đã kiểm là có WhatsApp**, kèm `whatsapp_url = 'https://wa.me/' || <số không dấu +>`. Danh sách buyer đọc view này và hiện nút "Nhắn WhatsApp"; số chưa kiểm thì không có nút, không có suy đoán. View rỗng khi chưa cắm dịch vụ kiểm — và đó là trạng thái đúng.
+
+### Kiểm chứng
+
+- `npm run connector:test` — 120 check, thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
+- `npm run persist:test` — 63 check: E.164 được lưu đúng, `has_whatsapp` là `null` sau khi connector ghi, view WhatsApp trống khi chưa kiểm, rồi mô phỏng kết quả kiểm → view trả `https://wa.me/17074522800`, và hai ràng buộc mới bị database từ chối thi hành.
