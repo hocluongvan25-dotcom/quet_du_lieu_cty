@@ -133,6 +133,15 @@ export * from "@/lib/data/buyer-view";
   check("email bộ phận được ghi đúng là bộ phận", demo.contacts.find((contact) => contact.value === "ingredients@mariani.com")?.identityMatch === "department");
   check("không có dòng nào bịa giá trị ngoài fixture", demo.contacts.every((contact) => !/^(sales|procurement|info)@mariani\.com$/i.test(contact.value)));
 
+  // Đối chiếu pháp nhân (011) trong dữ liệu mẫu.
+  const demoWithRegistry = demo.buyers.find((buyer) => buyer.registry);
+  check("dữ liệu mẫu có một công ty kèm đối chiếu pháp nhân", Boolean(demoWithRegistry?.registry));
+  check("đối chiếu pháp nhân ghi rõ sổ nào", demoWithRegistry?.registry?.registryLabel === "UK Companies House");
+  check("đối chiếu pháp nhân có số đăng ký và tình trạng", Boolean(demoWithRegistry?.registry?.companyNumber) && Boolean(demoWithRegistry?.registry?.status));
+  check("người đương nhiệm được nêu kèm chức danh", (demoWithRegistry?.registry?.officers ?? []).every((officer) => officer.name.length > 0));
+  check("đối chiếu pháp nhân không sinh ra kênh liên hệ nào", demo.contacts.every((contact) => contact.buyerId !== demoWithRegistry?.id));
+  check("đối chiếu pháp nhân không lọt vào CSV", !api.buildBuyerCsv(demo).includes("Companies House"));
+
   // ------------------------------------------------------------------ filter -
   section("lọc");
   const byCountry = api.filterBuyerList(demo, { country: "United States" });
@@ -242,6 +251,40 @@ export * from "@/lib/data/buyer-view";
   check("đếm kênh bị giữ lại", mapped.buyers[0].withheldChannels === 2);
   check("số người và số kênh đã xác minh đọc đúng", mapped.buyers[0].namedPeople === 1 && mapped.buyers[0].verifiedChannels === 1);
   check("tên người và chức danh giữ nguyên", mapped.contacts[0].personName === "Dana Whitfield" && mapped.contacts[0].jobTitle === "Director");
+  const registryMap = api.toRegistryRowByBuyer(
+    [
+      {
+        registry_match_id: "rm-1",
+        buyer_profile_id: "bp-1",
+        registry: "companies_house",
+        registry_label: "UK Companies House",
+        registered_name: "GREAT LAKES PACKAGING LTD",
+        company_number: "99999999",
+        status: "active",
+        incorporated_on: "2014-08-19",
+        industry: "SIC 46370",
+        former_names: ["GREAT LAKES PACKAGING LIMITED"],
+        source_url: "https://find-and-update.company-information.service.gov.uk/company/99999999/officers",
+        queried_name: "Great Lakes Packaging LLC",
+        checked_at: "2026-10-06T09:12:00Z",
+        officer_count: 2,
+      },
+    ],
+    [
+      { registry_match_id: "rm-1", full_name: "SMITH, Jane", role_title: "director", appointed_on: "2014-08-19" },
+      { registry_match_id: "rm-1", full_name: "WHITFIELD, Dana", role_title: "director", appointed_on: "2019-07-02" },
+      { registry_match_id: "rm-2", full_name: "NGUYỄN Văn A", role_title: null, appointed_on: null },
+    ],
+  );
+  check("ghép lần đối chiếu với người đương nhiệm của nó", registryMap.get("bp-1")?.officers.length === 2);
+  const mappedWithRegistry = api.toBuyerList(summary, contactRows, new Map([["bp-1", 2]]), new Map(), registryMap);
+  check("đối chiếu pháp nhân theo đúng buyer", mappedWithRegistry.buyers[0].registry?.registeredName === "GREAT LAKES PACKAGING LTD");
+  check("không ghép lẫn người của lần đối chiếu khác", !JSON.stringify(mappedWithRegistry.buyers[0].registry).includes("NGUYỄN"));
+  const mappedWithoutRegistry = api.toBuyerList(summary, contactRows, new Map([["bp-1", 2]]));
+  check("chưa tra sổ thì danh sách không có khối đó, không lỗi", mappedWithoutRegistry.buyers[0].registry === null);
+  const registryCsv = api.buildBuyerCsv(mappedWithRegistry);
+  check("CSV giữ nguyên 15 cột, không thêm dữ liệu sổ đăng ký", registryCsv.split("\r\n")[0].split(",").length === 15 && !registryCsv.includes("99999999"));
+
   const mappedCsv = api.buildBuyerCsv(mapped);
   check("CSV từ dữ liệu thật có nguồn", mappedCsv.includes("https://greatlakespackaging.example/contact"));
   check("CSV từ dữ liệu thật có cờ verified", mappedCsv.includes(",yes,"));

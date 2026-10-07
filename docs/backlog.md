@@ -53,9 +53,10 @@ Lý do không nới quy tắc: số E.164 là thứ mở `wa.me/<số>`. Một m
 
 ---
 
-## 2. Kết quả đối chiếu sổ đăng ký chưa được lưu vào DB
+## 2. ~~Kết quả đối chiếu sổ đăng ký chưa được lưu vào DB~~ — **xong 07/10/2026**
 
 **Phát sinh:** 07/10/2026, khi cắm bước 3 (nguồn cấp 2) — spec §22.
+**Đã xong:** migration `011_registry_identity.sql` (`buyer_registry_matches` + `buyer_registry_officers` + view `buyer_registry_latest` + hàm `record_registry_match`), tầng ghi trong `persist.ts`, loader trong `buyers.ts`, và khối **"Đối chiếu pháp nhân"** trên danh sách buyer — spec §23. Kiểm: `persist:test` 108 check, `db:verify` 11 migration, `export:test` 54 check.
 
 Bước 1 của thiết kế chuẩn là "biết đang đọc website của ai". Từ hôm nay hệ thống
 **tra được** sổ đăng ký (UK Companies House, US SEC EDGAR) và trả về tên pháp

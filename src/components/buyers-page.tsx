@@ -9,14 +9,17 @@ import {
   ExternalLink,
   Filter,
   Globe2,
+  Landmark,
   Mail,
   Phone,
   Search,
   UserRound,
-  Users, MessageCircle } from "lucide-react";
+  Users,
+  MessageCircle,
+} from "lucide-react";
 
 import { WorkspaceShell } from "@/components/workspace-shell";
-import { filterBuyerList, type BuyerContactRow, type BuyerListRow } from "@/lib/data/buyer-view";
+import { filterBuyerList, type BuyerContactRow, type BuyerListRow, type BuyerRegistryRow } from "@/lib/data/buyer-view";
 import type { AppLocale } from "@/lib/i18n";
 
 /**
@@ -37,6 +40,84 @@ function formatDate(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString("vi-VN");
+}
+
+/**
+ * Khối "Đối chiếu pháp nhân": kết quả tra sổ đăng ký (bước 1 của thiết kế chuẩn).
+ *
+ * Chỉ hiện thứ sổ công bố: tên pháp nhân, số đăng ký, tình trạng, ngày thành lập,
+ * ngành, tên cũ, người đương nhiệm, nguồn và ngày tra. Sổ đăng ký **không** có
+ * email hay điện thoại, nên ở đây không có kênh liên hệ nào — và khối này không
+ * được trộn vào danh sách kênh bên dưới.
+ */
+function RegistryMatch({ registry, isVietnamese }: { registry: BuyerRegistryRow; isVietnamese: boolean }) {
+  const facts: { label: string; value: string }[] = [];
+  if (registry.registeredName) facts.push({ label: isVietnamese ? "Tên pháp nhân" : "Registered name", value: registry.registeredName });
+  if (registry.companyNumber) facts.push({ label: isVietnamese ? "Số đăng ký" : "Company number", value: registry.companyNumber });
+  if (registry.status) facts.push({ label: isVietnamese ? "Tình trạng" : "Status", value: registry.status });
+  if (registry.incorporatedOn) facts.push({ label: isVietnamese ? "Thành lập" : "Incorporated", value: registry.incorporatedOn });
+  if (registry.industry) facts.push({ label: isVietnamese ? "Ngành" : "Industry", value: registry.industry });
+  if (registry.formerNames.length > 0) facts.push({ label: isVietnamese ? "Tên cũ" : "Former names", value: registry.formerNames.join(" · ") });
+  // Tra theo tên nào là thông tin, không phải lời giải thích: nó cho biết vì sao
+  // sổ trả về pháp nhân này.
+  if (registry.queriedName) facts.push({ label: isVietnamese ? "Tra theo tên" : "Queried as", value: registry.queriedName });
+
+  return (
+    <div className="mb-2.5 rounded-xl border border-[#E7EAF1] bg-white px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <Landmark size={13} className="text-[#5D53E8]" />
+        <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#6C63E9]">
+          {isVietnamese ? "Đối chiếu pháp nhân" : "Registry match"}
+        </span>
+        <span className="text-[10px] font-semibold text-[#7B8190]">{registry.registryLabel}</span>
+        {registry.checkedAt ? (
+          <span className="text-[10px] text-[#9095A3]">
+            {isVietnamese ? "tra ngày" : "checked"} {formatDate(registry.checkedAt)}
+          </span>
+        ) : null}
+        {registry.sourceUrl ? (
+          <a
+            href={registry.sourceUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-[10px] font-bold text-[#6257E7] hover:text-[#4335CB]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            {isVietnamese ? "Nguồn" : "Source"} <ExternalLink size={10} />
+          </a>
+        ) : null}
+      </div>
+
+      <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+        {facts.map((fact) => (
+          <div key={fact.label} className="flex gap-1.5 text-[11px] leading-snug">
+            <dt className="shrink-0 text-[#9095A3]">{fact.label}:</dt>
+            <dd className="min-w-0 break-words font-semibold text-[#3B3F4F]">{fact.value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {registry.officers.length > 0 ? (
+        <div className="mt-2 border-t border-[#F0F1F4] pt-2">
+          <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#A0A5B2]">
+            {isVietnamese ? "Người đương nhiệm theo sổ" : "Officers on the register"}
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {registry.officers.map((officer) => (
+              <li key={`${officer.name}-${officer.role ?? ""}`} className="text-[11px] text-[#4E5361]">
+                <span className="font-semibold">{officer.name}</span>
+                {officer.role ? <span className="text-[#7B8190]"> · {officer.role}</span> : null}
+                {officer.appointedOn ? <span className="text-[#A0A5B2]"> · {officer.appointedOn}</span> : null}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-[10px] text-[#9095A3]">
+            {isVietnamese ? "Sổ đăng ký không công bố email hay điện thoại." : "Registers publish no email or phone."}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function BuyersPage({
@@ -224,6 +305,7 @@ export function BuyersPage({
                       {isOpen ? (
                         <tr>
                           <td colSpan={5} className="border-b border-[#F0F1F4] bg-[#FCFCFE] px-3 py-3">
+                            {buyer.registry ? <RegistryMatch registry={buyer.registry} isVietnamese={isVietnamese} /> : null}
                             {rows.length === 0 ? (
                               <p className="text-[11px] text-[#8B90A0]">
                                 {isVietnamese ? "Chưa có kênh nào qua được kiểm tra cho công ty này." : "No channel for this company has passed the check yet."}

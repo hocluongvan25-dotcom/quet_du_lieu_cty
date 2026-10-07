@@ -105,6 +105,21 @@ function sampleResult(overrides = {}) {
     requirements: [],
     notes: [],
     pagesFetched: 2,
+    registry: {
+      registry: "companies_house",
+      registryLabel: "UK Companies House",
+      sourceUrl: "https://find-and-update.company-information.service.gov.uk/company/99999999/officers",
+      registeredName: "ACME FOODS LTD",
+      companyNumber: "99999999",
+      status: "active",
+      incorporatedOn: "2011-05-04",
+      industry: "SIC 46370",
+      formerNames: ["ACME TRADING LIMITED"],
+      officers: [
+        { name: "SMITH, Jane", role: "director", appointedOn: "2011-05-04" },
+        { name: "OSEI, Raymond", role: "director", appointedOn: "2019-07-02" },
+      ],
+    },
     ...overrides,
   };
 }
@@ -250,6 +265,28 @@ function pgliteStore(db) {
       return rows;
     },
 
+    async recordRegistryMatch(row) {
+      // Gọi đúng hàm của migration 011 — chống trùng và kiểm dữ liệu nằm ở đó.
+      const { rows } = await db.query(
+        `select public.record_registry_match($1, $2::public.registry_source, $3, $4, $5, $6, $7, $8, $9, $10, $11::text[], $12::jsonb) as id`,
+        [
+          row.buyerProfileId,
+          row.registry,
+          row.registry_label,
+          row.source_url,
+          row.queried_name,
+          row.registered_name,
+          row.company_number,
+          row.status,
+          row.incorporated_on,
+          row.industry,
+          row.former_names,
+          JSON.stringify(row.officers),
+        ],
+      );
+      return { id: rows[0].id.id ?? rows[0].id };
+    },
+
     async insertRoutes(rows) {
       for (const row of rows) {
         await db.query(
@@ -385,10 +422,37 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   check("email bộ phận thành department_email", routeKinds.includes("department_email"));
   check("mỗi đường vào đều có nguồn", batch.routes.every((route) => route.source_url.startsWith("http")));
 
+  // ------------------------------------------------------ đối chiếu pháp nhân --
+  section("đối chiếu pháp nhân (batch)");
+  check(
+    "batch mang theo kết quả sổ đăng ký",
+    batch.registry?.registry === "companies_house" && batch.registry?.company_number === "99999999",
+    JSON.stringify(batch.registry),
+  );
+  check("tên đã dùng để tra được ghi lại", batch.registry?.queried_name === "Acme Foods Inc.", batch.registry?.queried_name);
+  check("chỉ người còn đương nhiệm vào batch", batch.registry?.officers.length === 2);
+  check("sổ đăng ký KHÔNG sinh ra kênh liên hệ nào", !JSON.stringify(batch.registry).includes("@"));
+  check("nguồn của sổ ghi kèm nhãn cơ quan", batch.registry?.registry_label === "UK Companies House" && batch.registry.source_url.startsWith("https://"));
+  const noRegistry = api.buildBuyerWriteBatch(sampleResult({ registry: undefined }), { organizationId: orgId, domain: "acme.example", country: "US" });
+  check("không tra được sổ thì batch không có phần đó, không lỗi", noRegistry.ok === true && noRegistry.batch.registry === null);
+  const registryNoSource = api.buildBuyerWriteBatch(
+    sampleResult({ registry: { ...sampleResult().registry, sourceUrl: "" } }),
+    { organizationId: orgId, domain: "acme.example", country: "US" },
+  );
+  check("đối chiếu thiếu trang nguồn → bỏ, ghi lý do", registryNoSource.batch.registry === null && registryNoSource.batch.skipped.some((item) => item.reason.includes("trang nguồn")));
+  const registryNoIdentity = api.buildBuyerWriteBatch(
+    sampleResult({ registry: { ...sampleResult().registry, registeredName: null, companyNumber: null } }),
+    { organizationId: orgId, domain: "acme.example", country: "US" },
+  );
+  check(
+    "đối chiếu không nêu được tên pháp nhân lẫn số đăng ký → bỏ",
+    registryNoIdentity.batch.registry === null && registryNoIdentity.batch.skipped.some((item) => item.reason.includes("tên pháp nhân")),
+  );
+
   // ------------------------------------------------- 2. ghi vào Postgres thật --
-  section("ghi vào Postgres thật (PGlite, đủ 10 migration)");
+  section("ghi vào Postgres thật (PGlite, đủ 11 migration)");
   const { db, migrationCount } = await bootDatabase();
-  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 10, String(migrationCount));
+  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 11, String(migrationCount));
 
   await db.query(
     `insert into auth.users (id, email, raw_user_meta_data)
@@ -454,6 +518,105 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   check("tổng số kênh vẫn là 3", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 3);
   check("last_seen_at được làm mới", (await db.query("select bool_and(last_seen_at > created_at) as ok from public.contact_channels where buyer_profile_id = $1", [buyerRow.id])).rows[0].ok === true);
 
+  // ------------------------------------- 2a. đối chiếu pháp nhân (011) --------
+  section("đối chiếu pháp nhân ghi vào database (011)");
+  const matchRows = (await db.query("select id, organization_id, buyer_profile_id, registry, registry_label, registered_name, company_number, status, incorporated_on, industry, former_names, checked_at from public.buyer_registry_matches where buyer_profile_id = $1", [buyerRow.id])).rows;
+  check("ghi đúng một lần đối chiếu", matchRows.length === 1, String(matchRows.length));
+  const match = matchRows[0];
+  const firstCheckedAt = match.checked_at;
+  check("sổ được ghi kèm nhãn cơ quan", match?.registry === "companies_house" && match?.registry_label === "UK Companies House");
+  check("pháp nhân giữ nguyên như sổ công bố", match?.registered_name === "ACME FOODS LTD" && match?.company_number === "99999999");
+  check("tình trạng, ngày thành lập, ngành được ghi", match?.status === "active" && match?.incorporated_on === "2011-05-04" && match?.industry === "SIC 46370");
+  check("tên cũ được ghi", JSON.stringify(match?.former_names) === JSON.stringify(["ACME TRADING LIMITED"]));
+  check("organization_id suy từ buyer_profiles, không nhận từ tham số", match?.organization_id === realOrgId);
+  const officerRows = (await db.query("select full_name, role_title, appointed_on from public.buyer_registry_officers where registry_match_id = $1 order by full_name", [match.id])).rows;
+  check("hai người đương nhiệm được ghi", officerRows.length === 2, JSON.stringify(officerRows));
+  check("chức danh giữ nguyên như sổ ghi", officerRows.some((row) => row.full_name === "SMITH, Jane" && row.role_title === "director"));
+  check(
+    "bảng người đương nhiệm không có cột email/điện thoại",
+    (await db.query("select count(*)::int as n from information_schema.columns where table_schema = 'public' and table_name = 'buyer_registry_officers' and column_name in ('email', 'phone', 'value')")).rows[0].n === 0,
+  );
+  check("nguồn dữ liệu là dòng market_sources của sổ", (await db.query("select count(*)::int as n from public.market_sources where key = 'companies_house'")).rows[0].n === 1);
+  check(
+    "view buyer_registry_latest đọc ra đúng dòng mới nhất",
+    (await db.query("select registered_name, officer_count from public.buyer_registry_latest where buyer_profile_id = $1", [buyerRow.id])).rows[0]?.officer_count === 2,
+  );
+  check(
+    "đối chiếu pháp nhân không thêm kênh liên hệ nào",
+    (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 3,
+  );
+
+  // Chạy lại cùng kết quả: không thêm dòng, chỉ làm mới ngày.
+  const replay = await api.saveBuyerDiscovery(store, { ...batch, organizationId: realOrgId });
+  check("lần hai không thêm lần đối chiếu", replay.registryRecorded === 1 && (await db.query("select count(*)::int as n from public.buyer_registry_matches where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 1);
+  check(
+    "lần hai làm mới checked_at, không thêm dòng",
+    new Date((await db.query("select checked_at from public.buyer_registry_matches where id = $1", [match.id])).rows[0].checked_at).getTime() >= new Date(firstCheckedAt).getTime(),
+  );
+  check("và không nhân đôi người đương nhiệm", (await db.query("select count(*)::int as n from public.buyer_registry_officers where registry_match_id = $1", [match.id])).rows[0].n === 2);
+
+  // Sổ trả về kết quả khác (đổi tình trạng, thêm người): dòng mới, giữ lịch sử.
+  const changed = await api.saveBuyerDiscovery(store, {
+    ...batch,
+    organizationId: realOrgId,
+    registry: {
+      ...batch.registry,
+      status: "liquidation",
+      officers: [...batch.registry.officers, { name: "LINQVIST, Mia", role: "company secretary", appointedOn: "2021-01-15" }],
+    },
+  });
+  check("kết quả khác → thêm dòng mới", changed.ok === true && (await db.query("select count(*)::int as n from public.buyer_registry_matches where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 2);
+  check(
+    "view latest trỏ về lần đối chiếu mới nhất",
+    (await db.query("select status, officer_count from public.buyer_registry_latest where buyer_profile_id = $1", [buyerRow.id])).rows[0]?.status === "liquidation",
+  );
+  check("lịch sử vẫn đọc được", (await db.query("select count(*)::int as n from public.buyer_registry_matches where buyer_profile_id = $1 and status = 'active'", [buyerRow.id])).rows[0].n === 1);
+
+  // Hàm từ chối dữ liệu không phải một lần đối chiếu.
+  const rejects = async (sql, params) => db.query(sql, params).then(() => false).catch((error) => error.message);
+  const noSourceMessage = await rejects(
+    "select public.record_registry_match($1, 'companies_house', 'UK Companies House', '  ', 'Acme', 'ACME FOODS LTD', null)",
+    [buyerRow.id],
+  );
+  check("hàm từ chối đối chiếu thiếu trang nguồn", /trang nguồn/.test(noSourceMessage), noSourceMessage);
+  const noIdentityMessage = await rejects(
+    "select public.record_registry_match($1, 'companies_house', 'UK Companies House', 'https://example.test/x', 'Acme', null, null)",
+    [buyerRow.id],
+  );
+  check("hàm từ chối đối chiếu không có tên pháp nhân lẫn số đăng ký", /tên pháp nhân/.test(noIdentityMessage), noIdentityMessage);
+  const noLabelMessage = await rejects(
+    "select public.record_registry_match($1, 'companies_house', '   ', 'https://example.test/x', 'Acme', 'ACME FOODS LTD', null)",
+    [buyerRow.id],
+  );
+  check("hàm từ chối đối chiếu thiếu nhãn sổ", /nhãn sổ/.test(noLabelMessage), noLabelMessage);
+  const unknownBuyerMessage = await rejects(
+    "select public.record_registry_match('33333333-3333-3333-3333-333333333333', 'companies_house', 'UK Companies House', 'https://example.test/x', 'Acme', 'ACME FOODS LTD', null)",
+    [],
+  );
+  check("hàm từ chối buyer không tồn tại", /buyer_profile/.test(unknownBuyerMessage), unknownBuyerMessage);
+  const secMessage = await rejects(
+    "select public.record_registry_match($1, 'sec_edgar', 'US SEC EDGAR', 'https://www.sec.gov/x', 'Acme', 'ACME FOODS INC', null)",
+    [buyerRow.id],
+  );
+  check("sổ đã có trong market_sources thì ghi được", !/market_sources/.test(secMessage), secMessage);
+
+  // Người thiếu tên bị bỏ qua, phần còn lại vẫn ghi.
+  const partial = await api.saveBuyerDiscovery(store, {
+    ...batch,
+    organizationId: realOrgId,
+    registry: {
+      ...batch.registry,
+      status: "changed-status-again",
+      officers: [
+        { name: "  ", role: "director", appointedOn: null },
+        { name: "OSEI, Raymond", role: "director", appointedOn: "2019-07-02" },
+      ],
+    },
+  });
+  const partialMatch = (await db.query("select id from public.buyer_registry_matches where buyer_profile_id = $1 order by checked_at desc limit 1", [buyerRow.id])).rows[0];
+  check("người thiếu tên bị bỏ, không làm hỏng lần ghi", partial.ok === true && (await db.query("select count(*)::int as n from public.buyer_registry_officers where registry_match_id = $1", [partialMatch.id])).rows[0].n === 1);
+  check("và tên rỗng không vào database", (await db.query("select count(*)::int as n from public.buyer_registry_officers where btrim(full_name) = ''")).rows[0].n === 0);
+
   // Ranh giới tenant: người của workspace khác không thấy gì.
   await db.query(
     `insert into auth.users (id, email) values ($1, 'other@example.com')`,
@@ -464,6 +627,16 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   await db.query("set role authenticated");
   check("workspace khác không thấy buyer này", (await db.query("select count(*)::int as n from public.buyer_outreach_summary where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 0);
   check("workspace khác không thấy kênh", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 0);
+  check("workspace khác không thấy đối chiếu pháp nhân", (await db.query("select count(*)::int as n from public.buyer_registry_matches where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 0);
+  check("workspace khác không thấy người đương nhiệm", (await db.query("select count(*)::int as n from public.buyer_registry_officers")).rows[0].n === 0);
+  check("workspace khác không thấy view đối chiếu", (await db.query("select count(*)::int as n from public.buyer_registry_latest where buyer_profile_id = $1", [buyerRow.id])).rows[0].n === 0);
+  let registryWriteDenied = false;
+  try {
+    await db.query("insert into public.buyer_registry_matches (organization_id, buyer_profile_id, market_source_id, registry, registry_label, source_url, queried_name, registered_name) values ($1, $2, (select id from public.market_sources where key = 'companies_house'), 'companies_house', 'UK Companies House', 'https://example.test/x', 'Acme', 'ACME FOODS LTD')", [realOrgId, buyerRow.id]);
+  } catch (error) {
+    registryWriteDenied = /permission denied/i.test(error.message);
+  }
+  check("người dùng thường không ghi thẳng được bảng đối chiếu", registryWriteDenied);
   await db.query("reset role");
 
   // ------------------------------------- 2b. E.164 + WhatsApp (008) ----------

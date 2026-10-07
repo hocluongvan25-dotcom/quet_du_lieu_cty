@@ -751,3 +751,43 @@ Trước vòng này `DEPARTMENT_LOCALS` gộp cả hộp thư chung (`info`, `he
 
 - **Hội chợ / hiệp hội ngành**: chưa cắm, và sẽ chỉ cắm khi có nguồn thật để đọc (xem `docs/backlog.md`).
 - **Kết quả sổ đăng ký chưa được lưu vào DB**: hiện đi kèm JSON trả về và hiện trên CLI, chưa có bảng/cột để hiển thị trong danh sách buyer. Việc này cần migration 011 — ghi trong `docs/backlog.md`.
+
+## 23. Đối chiếu pháp nhân vào database và lên danh sách buyer (07/10/2026)
+
+Bước 1 của thiết kế chuẩn là **Resolve Entity & Domain**: biết chắc đang đọc website của ai. §22 đã cắm phần tra sổ đăng ký, nhưng kết quả chỉ nằm trong JSON trả về — không có chỗ trong database, nên người dùng không thấy được, và lần chạy sau không đọc lại được. Migration 011 và khối "Đối chiếu pháp nhân" trên danh sách buyer làm nốt phần đó.
+
+### Ba bảng, ba việc
+
+| Đối tượng | Việc |
+| --- | --- |
+| `buyer_registry_matches` | Một lần đối chiếu: sổ nào, trang nguồn, tên đã dùng để tra, tên pháp nhân, số đăng ký, tình trạng, ngày thành lập, ngành (SIC), tên cũ, thời điểm tra |
+| `buyer_registry_officers` | Người **còn đương nhiệm** theo sổ: tên, chức danh nguyên văn, ngày bổ nhiệm |
+| `buyer_registry_latest` | View: lần đối chiếu mới nhất của mỗi buyer, kèm số người — để danh sách đọc thẳng, không phải tự chọn |
+
+### Bốn quyết định, và lý do
+
+**1. Sổ đăng ký không bao giờ tạo ra kênh liên hệ.** Sổ công bố tên pháp nhân, số đăng ký, tình trạng và người đương nhiệm — **không** có email, không có điện thoại. Vì vậy kết quả nằm ở bảng riêng, không đi vào `contact_channels`, và bảng người đương nhiệm **không có cột liên hệ nào**: một cột email ở đó là mở đường cho việc bịa. Người đương nhiệm theo sổ là người của pháp nhân, không phải đầu mối của phòng mua hàng — hai câu hỏi khác nhau.
+
+**2. Không ghi thứ không tìm thấy.** Không có dòng nào cho "đã tra nhưng không có kết quả". Không tìm thấy thì không có gì để nói, và §9 đã chốt: thứ không tìm thấy không bao giờ được hiển thị — kể cả dưới dạng một dòng trống.
+
+**3. Chạy lại không nhân đôi, nhưng lịch sử không mất.** Cùng sổ, cùng pháp nhân, cùng danh sách người → chỉ làm mới `checked_at` và trang nguồn. Kết quả **khác** (tình trạng chuyển sang `liquidation`, một giám đốc rời đi) → thêm dòng mới, dòng cũ vẫn nằm đó. Đọc lại là biết sổ đã đổi lúc nào. Giống hệt cách `contact_channels` xử lý lần chạy lặp.
+
+**4. Một hàm ghi, không phải insert thẳng.** `record_registry_match(...)` (service-role only): suy `organization_id` từ chính `buyer_profiles` — người gọi không thể ghi lệch tenant; tra `market_sources` theo sổ nên nguyên tắc "không nguồn nào được lưu nếu chưa có dòng trong `market_sources`" (005) vẫn giữ ở tầng DB; và từ chối dòng thiếu trang nguồn, thiếu nhãn cơ quan, thiếu tên đã dùng để tra, hoặc không nêu được tên pháp nhân lẫn số đăng ký. Người thiếu tên trong danh sách bị **bỏ qua** thay vì làm hỏng cả lần ghi.
+
+### Ngày tháng giữ nguyên chuỗi
+
+`incorporated_on` là `text`, không phải `date`. Sổ trả về ngày thiếu (`1998-04`) và không phải lúc nào cũng có ngày; ép sang `date` là tự thêm một ngày không ai công bố. Đây là cùng một nguyên tắc với `value` của số điện thoại: giữ đúng thứ nguồn đưa.
+
+### Trên danh sách buyer
+
+Khối **"Đối chiếu pháp nhân"** nằm trong dòng mở rộng của công ty, phía trên danh sách kênh — nêu sổ nào, tra ngày nào, nguồn, tên pháp nhân, số đăng ký, tình trạng, thành lập, ngành, tên cũ, **tên đã dùng để tra**, và người đương nhiệm kèm chức danh. Dòng cuối của khối nói thẳng: *"Sổ đăng ký không công bố email hay điện thoại."* — để không ai đọc khối này thành danh sách liên hệ.
+
+CSV **không đổi**: vẫn 15 cột đã chốt. Đối chiếu pháp nhân là thông tin định danh công ty, không phải một dòng liên hệ, và trộn nó vào CSV là làm hỏng hợp đồng cột đang chạy với người dùng.
+
+Chưa chạy migration 011, hoặc chưa tra sổ lần nào → hai truy vấn trả rỗng, khối không hiện, danh sách chạy y như trước. Danh sách mẫu có một công ty **hư cấu** (`Thames Valley Foods Ltd.`) mang khối này, để thấy giao diện ngay cả khi chưa có khoá API: gán một số đăng ký giả cho một công ty có thật là bịa một dữ kiện về pháp nhân đó.
+
+### Kiểm chứng
+
+- `npm run persist:test` — **108 check** (trước vòng này 71): batch mang kết quả sổ, chặn dữ liệu không phải lần đối chiếu; ghi vào Postgres thật (PGlite, 11 migration), chống trùng, thêm dòng khi kết quả khác, `organization_id` suy từ buyer, người thiếu tên bị bỏ, ranh giới tenant, người dùng thường không ghi thẳng được.
+- `npm run db:verify` — 11 migration, thêm mục 011: hàm ghi, chống trùng, view latest, năm kiểu dữ liệu sai bị từ chối, RLS hai chiều, và "bảng người đương nhiệm không có cột liên hệ nào".
+- `npm run export:test` — **54 check** (trước 43): ghép lần đối chiếu với người của nó, không ghép lẫn lần khác, chưa tra sổ thì không có khối, CSV vẫn 15 cột và **không** lẫn dữ liệu sổ.

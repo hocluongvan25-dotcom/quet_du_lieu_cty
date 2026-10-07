@@ -89,6 +89,26 @@ export type BatchRoute = {
   evidence_snippet: string | null;
 };
 
+/**
+ * Kết quả đối chiếu pháp nhân (bước 1). Sổ đăng ký **không** tạo ra kênh liên hệ:
+ * sổ không có email hay điện thoại. Vì vậy phần này đi vào bảng riêng, và ở đây
+ * chỉ mang đúng thứ sổ công bố.
+ */
+export type BatchRegistryMatch = {
+  registry: "companies_house" | "sec_edgar";
+  registry_label: string;
+  source_url: string;
+  queried_name: string;
+  registered_name: string | null;
+  company_number: string | null;
+  status: string | null;
+  incorporated_on: string | null;
+  industry: string | null;
+  former_names: string[];
+  /** Chỉ người còn đương nhiệm — sổ đã lọc trước khi tới đây. */
+  officers: { name: string; role: string | null; appointed_on: string | null }[];
+};
+
 export type BuyerWriteBatch = {
   organizationId: string;
   marketSourceKey: string;
@@ -100,6 +120,8 @@ export type BuyerWriteBatch = {
     website: string;
   };
   people: BatchPerson[];
+  /** Có khi bước 3 tra được sổ đăng ký. Không có thì không ghi gì. */
+  registry: BatchRegistryMatch | null;
   channels: BatchChannel[];
   routes: BatchRoute[];
   /** Thứ bị bỏ lại, kèm lý do. Không hiện cho người dùng (spec §9). */
@@ -115,6 +137,8 @@ export type SaveResult =
       channels: { inserted: number; refreshed: number; skipped: number; phonesNormalized: number };
       people: { inserted: number; refreshed: number };
       routes: { inserted: number; refreshed: number };
+      /** Số lần đối chiếu pháp nhân đã ghi (0 hoặc 1) — chỉ khi tra được sổ. */
+      registryRecorded: number;
       /** Luôn 0: connector không sinh email theo pattern. */
       candidatesInserted: 0;
     }
@@ -342,6 +366,44 @@ export function buildBuyerWriteBatch(
     });
   });
 
+  // ------------------------------------------------------ đối chiếu pháp nhân --
+  // Nguồn của phần này là sổ đăng ký, không phải website công ty, nên nó đi kèm
+  // nguồn riêng (mỗi sổ một dòng `market_sources`) — không gộp vào lần ghi
+  // website. Sổ không có email/điện thoại: ở đây không sinh ra kênh nào.
+  let registry: BatchRegistryMatch | null = null;
+  if (result.registry) {
+    const finding = result.registry;
+    const sourceUrl = clean(finding.sourceUrl);
+    const registeredName = clean(finding.registeredName) || null;
+    const companyNumber = clean(finding.companyNumber) || null;
+
+    if (!sourceUrl) {
+      skipped.push({ value: finding.registry, reason: "đối chiếu sổ đăng ký không có trang nguồn" });
+    } else if (!registeredName && !companyNumber) {
+      skipped.push({ value: finding.registry, reason: "đối chiếu sổ đăng ký không nêu được tên pháp nhân lẫn số đăng ký" });
+    } else {
+      registry = {
+        registry: finding.registry,
+        registry_label: clean(finding.registryLabel) || finding.registry,
+        source_url: sourceUrl,
+        queried_name: name,
+        registered_name: registeredName,
+        company_number: companyNumber,
+        status: clean(finding.status) || null,
+        incorporated_on: clean(finding.incorporatedOn) || null,
+        industry: clean(finding.industry) || null,
+        former_names: (finding.formerNames ?? []).map((item) => clean(item)).filter(Boolean),
+        officers: finding.officers
+          .map((officer) => ({
+            name: clean(officer.name),
+            role: clean(officer.role) || null,
+            appointed_on: clean(officer.appointedOn) || null,
+          }))
+          .filter((officer) => officer.name.length > 0),
+      };
+    }
+  }
+
   return {
     ok: true,
     batch: {
@@ -357,6 +419,7 @@ export function buildBuyerWriteBatch(
       people,
       channels,
       routes,
+      registry,
       skipped,
     },
   };
@@ -380,6 +443,12 @@ export type BuyerStore = {
   touchChannels(ids: string[]): Promise<void>;
   listRoutes(buyerProfileId: string): Promise<{ id: string; route_kind: string; url: string | null; value: string | null }[]>;
   insertRoutes(rows: Record<string, unknown>[]): Promise<void>;
+  /**
+   * Ghi một lần đối chiếu pháp nhân. Việc chống trùng nằm trong hàm SQL
+   * `record_registry_match` (011): cùng pháp nhân, cùng người thì chỉ làm mới
+   * `checked_at` — nên gọi lại ở đây là an toàn.
+   */
+  recordRegistryMatch(row: BatchRegistryMatch & { buyerProfileId: string }): Promise<{ id: string }>;
 };
 
 export async function saveBuyerDiscovery(store: BuyerStore, batch: BuyerWriteBatch): Promise<SaveResult> {
@@ -481,6 +550,13 @@ export async function saveBuyerDiscovery(store: BuyerStore, batch: BuyerWriteBat
     );
   }
 
+  // -------------------------------------------------------- đối chiếu pháp nhân --
+  let registryRecorded = 0;
+  if (batch.registry) {
+    await store.recordRegistryMatch({ ...batch.registry, buyerProfileId });
+    registryRecorded = 1;
+  }
+
   return {
     ok: true,
     buyerProfileId,
@@ -493,6 +569,7 @@ export async function saveBuyerDiscovery(store: BuyerStore, batch: BuyerWriteBat
     },
     people: { inserted: peopleToInsert.length, refreshed: refreshedPeople.length },
     routes: { inserted: routesToInsert.length, refreshed: batch.routes.length - routesToInsert.length },
+    registryRecorded,
     // Không có nhánh nào ghi vào contact_candidates: connector không đoán email.
     candidatesInserted: 0,
   };
@@ -571,6 +648,31 @@ export function supabaseBuyerStore(client: SupabaseClient): BuyerStore {
     async insertRoutes(rows) {
       const { error } = await client.from("buyer_routes").insert(rows);
       if (error) throw new Error(error.message);
+    },
+
+    async recordRegistryMatch(row) {
+      const { data, error } = await client
+        .rpc("record_registry_match", {
+          p_buyer_profile_id: row.buyerProfileId,
+          p_registry: row.registry,
+          p_registry_label: row.registry_label,
+          p_source_url: row.source_url,
+          p_queried_name: row.queried_name,
+          p_registered_name: row.registered_name,
+          p_company_number: row.company_number,
+          p_status: row.status,
+          p_incorporated_on: row.incorporated_on,
+          p_industry: row.industry,
+          p_former_names: row.former_names,
+          p_officers: row.officers.map((officer) => ({
+            name: officer.name,
+            role: officer.role,
+            appointed_on: officer.appointed_on,
+          })),
+        })
+        .single();
+      if (error) throw new Error(error.message);
+      return { id: (data as { id: string }).id };
     },
   };
 }

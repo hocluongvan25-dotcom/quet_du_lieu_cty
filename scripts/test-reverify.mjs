@@ -178,7 +178,7 @@ export const api = { reverifyChannel, reverifyChannels, valueAppears, evidenceLi
   // ---------------------------------------------------- 2. phần SQL ----------
   section("SQL: hàng đợi và hệ quả (PGlite, đủ 10 migration)");
   const { db, migrationCount } = await bootDatabase();
-  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 10, String(migrationCount));
+  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 11, String(migrationCount));
 
   await db.query(
     `insert into auth.users (id, email) values ($1, 'owner@example.com')`,

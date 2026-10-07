@@ -654,6 +654,150 @@ await asUser(userA);
 // Trả lại đúng trạng thái mà phần sau đang chờ: vai authenticated, và danh tính
 // là chủ workspace — quên bước này thì các phép kiểm phía dưới chạy nhầm người.
 
+section("đối chiếu pháp nhân (011)");
+
+// Hàm ghi của 011 chỉ cấp cho service_role — đúng như production, nơi tầng ghi
+// dữ liệu chạy bằng service role. Ở đây bỏ vai `authenticated` để gọi nó, rồi
+// trả lại vai đó ở cuối phần này cho các phép kiểm phía sau.
+await db.query("reset role");
+
+// Ghi một lần đối chiếu bằng chính hàm của migration — đây là đường mà tầng ứng
+// dụng đi, nên kiểm ở đây là kiểm đúng thứ chạy thật.
+const registryMatch = (
+  await db.query(
+    `select * from public.record_registry_match(
+       $1, 'companies_house', 'UK Companies House',
+       'https://find-and-update.company-information.service.gov.uk/company/99999999/officers',
+       'Great Lakes Packaging LLC', 'GREAT LAKES PACKAGING LTD', '99999999',
+       'active', '2014-08-19', 'SIC 46370', '{GREAT LAKES PACKAGING LIMITED}',
+       '[{"name":"SMITH, Jane","role":"director","appointed_on":"2014-08-19"},
+         {"name":"WHITFIELD, Dana","role":"director","appointed_on":"2019-07-02"},
+         {"name":"  ","role":"director"}]'::jsonb
+     )`,
+    [buyerId],
+  )
+).rows[0];
+check("ghi được một lần đối chiếu", registryMatch?.registered_name === "GREAT LAKES PACKAGING LTD", JSON.stringify(registryMatch));
+check("organization_id suy từ buyer_profiles", registryMatch?.organization_id === orgId);
+check("nối đúng dòng market_sources của sổ", (await db.query("select key from public.market_sources where id = $1", [registryMatch.market_source_id])).rows[0].key === "companies_house");
+check(
+  "người đương nhiệm thiếu tên bị bỏ, hai người còn lại được ghi",
+  (await db.query("select count(*)::int as n from public.buyer_registry_officers where registry_match_id = $1", [registryMatch.id])).rows[0].n === 2,
+);
+check(
+  "chức danh giữ nguyên như sổ ghi",
+  (await db.query("select count(*)::int as n from public.buyer_registry_officers where registry_match_id = $1 and full_name = 'SMITH, Jane' and role_title = 'director' and appointed_on = '2014-08-19'", [registryMatch.id])).rows[0].n === 1,
+);
+check(
+  "bảng người đương nhiệm không có cột liên hệ nào",
+  (await db.query("select count(*)::int as n from information_schema.columns where table_schema = 'public' and table_name in ('buyer_registry_matches','buyer_registry_officers') and column_name in ('email','phone','phone_e164','value')")).rows[0].n === 0,
+);
+
+// Chạy lại cùng kết quả: only the checked_at moves.
+const registryBefore = (await db.query("select count(*)::int as n from public.buyer_registry_matches where buyer_profile_id = $1", [buyerId])).rows[0].n;
+await db.query(
+  `select public.record_registry_match($1, 'companies_house', 'UK Companies House',
+     'https://find-and-update.company-information.service.gov.uk/company/99999999/officers',
+     'Great Lakes Packaging LLC', 'GREAT LAKES PACKAGING LTD', '99999999',
+     'active', '2014-08-19', 'SIC 46370', '{GREAT LAKES PACKAGING LIMITED}',
+     '[{"name":"SMITH, Jane","role":"director","appointed_on":"2014-08-19"},
+       {"name":"WHITFIELD, Dana","role":"director","appointed_on":"2019-07-02"}]'::jsonb)`,
+  [buyerId],
+);
+check("chạy lại cùng kết quả → không thêm dòng", (await db.query("select count(*)::int as n from public.buyer_registry_matches where buyer_profile_id = $1", [buyerId])).rows[0].n === registryBefore);
+check(
+  "và không nhân đôi người đương nhiệm",
+  (await db.query("select count(*)::int as n from public.buyer_registry_officers where registry_match_id = $1", [registryMatch.id])).rows[0].n === 2,
+);
+
+// Kết quả khác (đổi tình trạng): dòng mới, lịch sử còn nguyên.
+await db.query(
+  `select public.record_registry_match($1, 'companies_house', 'UK Companies House',
+     'https://find-and-update.company-information.service.gov.uk/company/99999999/officers',
+     'Great Lakes Packaging LLC', 'GREAT LAKES PACKAGING LTD', '99999999',
+     'liquidation', '2014-08-19', 'SIC 46370', '{}',
+     '[{"name":"SMITH, Jane","role":"director","appointed_on":"2014-08-19"}]'::jsonb)`,
+  [buyerId],
+);
+check("tình trạng đổi → thêm dòng mới, giữ lịch sử", (await db.query("select count(*)::int as n from public.buyer_registry_matches where buyer_profile_id = $1", [buyerId])).rows[0].n === registryBefore + 1);
+const latestRegistry = (await db.query("select status, registered_name, officer_count, registry_label, source_url from public.buyer_registry_latest where buyer_profile_id = $1", [buyerId])).rows[0];
+check(
+  "view đọc ra lần đối chiếu mới nhất kèm số người",
+  latestRegistry?.status === "liquidation" && latestRegistry?.officer_count === 1,
+  JSON.stringify(latestRegistry),
+);
+check("view ghi kèm nhãn cơ quan và trang nguồn", latestRegistry?.registry_label === "UK Companies House" && String(latestRegistry?.source_url).includes("company-information"));
+
+// SEC EDGAR: cùng cơ chế, khác sổ.
+await db.query(
+  `select public.record_registry_match($1, 'sec_edgar', 'US SEC EDGAR',
+     'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000320193',
+     'Great Lakes Packaging LLC', 'GREAT LAKES PACKAGING INC', 'CIK 0000320193',
+     'hồ sơ gần nhất 2025-10-31', null, 'Packaging', '{}', '[]'::jsonb)`,
+  [buyerId],
+);
+check("hai sổ khác nhau cùng tồn tại cho một buyer", (await db.query("select count(distinct registry)::int as n from public.buyer_registry_matches where buyer_profile_id = $1", [buyerId])).rows[0].n === 2);
+check("sổ không có người đương nhiệm vẫn ghi được", (await db.query("select count(*)::int as n from public.buyer_registry_latest where buyer_profile_id = $1", [buyerId])).rows[0].n === 1);
+
+// Hàm từ chối những thứ không phải một lần đối chiếu.
+await db.query("reset role");
+const missingSource = await expectFailure(
+  "select public.record_registry_match($1, 'companies_house', 'UK Companies House', '   ', 'Great Lakes Packaging LLC', 'GREAT LAKES PACKAGING LTD', null)",
+  [buyerId],
+  "Thiếu trang nguồn",
+);
+check("từ chối đối chiếu không có trang nguồn", missingSource.ok, missingSource.message);
+const missingIdentity = await expectFailure(
+  "select public.record_registry_match($1, 'companies_house', 'UK Companies House', 'https://example.test/x', 'Great Lakes Packaging LLC', null, null)",
+  [buyerId],
+  "Không có tên pháp nhân",
+);
+check("từ chối đối chiếu không nêu được pháp nhân", missingIdentity.ok, missingIdentity.message);
+const missingLabel = await expectFailure(
+  "select public.record_registry_match($1, 'companies_house', '  ', 'https://example.test/x', 'Great Lakes Packaging LLC', 'GREAT LAKES PACKAGING LTD', null)",
+  [buyerId],
+  "Thiếu nhãn sổ đăng ký",
+);
+check("từ chối đối chiếu thiếu nhãn cơ quan", missingLabel.ok, missingLabel.message);
+const missingQuery = await expectFailure(
+  "select public.record_registry_match($1, 'companies_house', 'UK Companies House', 'https://example.test/x', '   ', 'GREAT LAKES PACKAGING LTD', null)",
+  [buyerId],
+  "Thiếu tên đã dùng để tra",
+);
+check("từ chối đối chiếu không ghi lại tên đã tra", missingQuery.ok, missingQuery.message);
+const unknownBuyer = await expectFailure(
+  "select public.record_registry_match('44444444-4444-4444-4444-444444444444', 'companies_house', 'UK Companies House', 'https://example.test/x', 'X', 'X LTD', null)",
+  [],
+  "buyer_profile",
+);
+check("từ chối buyer không tồn tại", unknownBuyer.ok, unknownBuyer.message);
+const badOfficers = await expectFailure(
+  `select public.record_registry_match($1, 'companies_house', 'UK Companies House', 'https://example.test/x', 'X', 'X LTD', null, null, null, null, '{}', '{"name":"x"}'::jsonb)`,
+  [buyerId],
+  "mảng JSON",
+);
+check("từ chối danh sách người không phải mảng", badOfficers.ok, badOfficers.message);
+
+// Người dùng thường: đọc được, không ghi được, không thấy workspace khác.
+await db.query("set role authenticated");
+await asUser(userA);
+check("thành viên đọc được lần đối chiếu", (await db.query("select count(*)::int as n from public.buyer_registry_latest where buyer_profile_id = $1", [buyerId])).rows[0].n === 1);
+check("thành viên đọc được người đương nhiệm", (await db.query("select count(*)::int as n from public.buyer_registry_officers")).rows[0].n > 0);
+const directInsert = await expectFailure(
+  "insert into public.buyer_registry_matches (organization_id, buyer_profile_id, market_source_id, registry, registry_label, source_url, queried_name, registered_name) values ($1, $2, $3, 'companies_house', 'UK Companies House', 'https://example.test/x', 'X', 'X LTD')",
+  [orgId, buyerId, registrySourceId],
+  "permission denied",
+);
+check("thành viên không ghi thẳng được vào bảng đối chiếu", directInsert.ok, directInsert.message);
+await asUser(userB);
+check("workspace khác không thấy đối chiếu pháp nhân", (await db.query("select count(*)::int as n from public.buyer_registry_matches")).rows[0].n === 0);
+check("workspace khác không thấy người đương nhiệm", (await db.query("select count(*)::int as n from public.buyer_registry_officers")).rows[0].n === 0);
+check("workspace khác không thấy view đối chiếu", (await db.query("select count(*)::int as n from public.buyer_registry_latest")).rows[0].n === 0);
+
+// Trả lại đúng trạng thái phần sau đang chờ: vai authenticated, danh tính chủ workspace.
+await asUser(userA);
+
+
 // --- what may leave the building (export views) -------------------------------
 const rawChannelCount = (await db.query("select count(*)::int as n from public.contact_channels")).rows[0].n;
 const exportable = (await db.query("select value from public.outreach_ready_channels order by value")).rows.map((row) => row.value);

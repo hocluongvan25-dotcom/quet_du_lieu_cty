@@ -71,7 +71,7 @@ The app keeps working without `.env.local`; it stays in demo mode.
 ## Connect Supabase
 
 1. Create a Supabase project.
-2. Run every file in `supabase/migrations/` (ten, in order) in its SQL editor, or use the Supabase CLI:
+2. Run every file in `supabase/migrations/` (eleven, in order) in its SQL editor, or use the Supabase CLI:
 
    ```bash
    supabase link --project-ref YOUR_PROJECT_REF
@@ -305,6 +305,15 @@ gone           → expire the channel now (it drops out of export), keep the row
 unreachable    → change nothing
 ```
 
+### Entity resolution: the registry match on the buyer list
+
+Step 1 of the standard design is *know whose website you are reading*. `record_registry_match(...)` (migration 011) stores what the register published — legal name, company number, status, incorporation date, SIC industry, former names, and the current officers — together with the page it was read from, the name that was queried, and when. Everything lands in `buyer_registry_matches` + `buyer_registry_officers`; `buyer_registry_latest` gives the list screen the newest match per buyer, and the buyers page shows it as a **"Đối chiếu pháp nhân"** block inside the expanded row.
+
+Two rules are enforced in the schema, not in the UI:
+
+- **A register never creates a contact channel.** It publishes no email and no phone, so it can never be a row in `contact_channels`: that is why the officers table has no contact columns at all, and why the block sits beside the channel list instead of inside it.
+- **Nothing is stored that was not found.** There is no row for "we looked and there was nothing" — no source page, no row. Re-running the same lookup refreshes `checked_at` and adds nothing; a *different* answer (status moved to liquidation, an officer changed) adds a row, so the history of the register stays readable. `organization_id` is derived from the buyer inside the function, never passed in by the caller.
+
 **`unreachable` is not "gone".** A network blip must never remove a customer's data — the next run retries, and the expiry still counts from the last time the value was actually seen. There is deliberately no third state for "the page changed to something else": the old value becomes `gone` and the connector finds the new one as a new channel, so a re-read only ever has to answer one question it can answer honestly.
 
 Every re-read is appended to `contact_reverifications` with the page, the quote and the time — `still_present` without a quote is rejected by the database, because "still there" has to be shown, not asserted.
@@ -398,5 +407,10 @@ supabase/migrations/003_change_monitoring_and_retention.sql
 supabase/migrations/004_retention_cron.sql
 supabase/migrations/005_buyer_discovery.sql
 supabase/migrations/006_contact_candidates_and_verification.sql
+supabase/migrations/007_evidence_is_required.sql
+supabase/migrations/008_whatsapp_and_e164.sql
+supabase/migrations/009_role_and_email_gates.sql
+supabase/migrations/010_reverification.sql
+supabase/migrations/011_registry_identity.sql
 docs/buyer-discovery-spec.md
 ```
