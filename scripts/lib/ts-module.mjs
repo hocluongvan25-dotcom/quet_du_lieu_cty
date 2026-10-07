@@ -1,12 +1,41 @@
 import { readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Gốc repo, suy từ vị trí file này (`scripts/lib/`) — không phụ thuộc cwd. */
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const workDir = path.join(root, ".ts-bundle");
+
+/**
+ * Gom một file .ts thành .mjs **trong cùng tiến trình**, bằng API JavaScript của
+ * esbuild.
+ *
+ * Trước đây chỗ này gọi `npx esbuild` qua `spawnSync`. Trên Windows, `npx` là
+ * `npx.cmd` nên `spawnSync` không spawn được (ENOENT), và khi đó cả `stderr` lẫn
+ * `stdout` đều là `undefined` — script in ra đúng một chữ "undefined" rồi thoát,
+ * trước cả khi gọi mạng. Gọi thẳng API thì không có gì phụ thuộc PATH hay shell.
+ */
+export async function bundleTs(entryPath, outfilePath, { alias = true } = {}) {
+  let esbuild;
+  try {
+    esbuild = await import("esbuild");
+  } catch {
+    console.error("Thiếu esbuild trong node_modules — chạy `npm ci` trước rồi thử lại.");
+    process.exit(1);
+  }
+
+  await esbuild.build({
+    entryPoints: [entryPath],
+    outfile: outfilePath,
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    absWorkingDir: root,
+    logLevel: "warning",
+    ...(alias ? { alias: { "@": path.join(root, "src") } } : {}),
+  });
+}
 
 /**
  * Nạp một module TypeScript của repo vào script Node **bằng đúng mã nguồn đang
@@ -20,15 +49,7 @@ export async function loadTsModule(exportLine, { tag = "entry" } = {}) {
   const source = Array.isArray(exportLine) ? exportLine.join("\n") : exportLine;
   await writeFile(entryPath, `${source}\n`, "utf8");
 
-  const build = spawnSync(
-    "npx",
-    ["--no-install", "esbuild", entryPath, "--bundle", "--platform=node", "--format=esm", "--alias:@=./src", `--outfile=${bundlePath}`, "--log-level=warning"],
-    { cwd: root, encoding: "utf8" },
-  );
-  if (build.status !== 0) {
-    console.error(build.stderr || build.stdout);
-    process.exit(1);
-  }
+  await bundleTs(entryPath, bundlePath);
   return import(pathToFileURL(bundlePath).href);
 }
 

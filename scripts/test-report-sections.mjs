@@ -10,9 +10,9 @@
  * Chạy: npm run report:test
  */
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { bundleTs } from "./lib/ts-module.mjs";
 
 const root = process.cwd();
 const workDir = path.join(root, ".report-test");
@@ -41,15 +41,7 @@ await mkdir(workDir, { recursive: true });
 const bundlePath = path.join(workDir, "bundle.mjs");
 await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
 
-const build = spawnSync(
-  "npx",
-  ["--no-install", "esbuild", path.join(workDir, "entry.ts"), "--bundle", "--platform=node", "--format=esm", "--alias:@=./src", `--outfile=${bundlePath}`, "--log-level=warning"],
-  { cwd: root, encoding: "utf8" },
-);
-if (build.status !== 0) {
-  console.error(build.stderr || build.stdout);
-  process.exit(1);
-}
+await bundleTs(path.join(workDir, "entry.ts"), bundlePath);
 
 const { buildReportSections, marianiReport } = await import(pathToFileURL(bundlePath).href);
 

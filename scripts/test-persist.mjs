@@ -19,9 +19,9 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { bundleTs } from "./lib/ts-module.mjs";
 import { PGlite } from "@electric-sql/pglite";
 
 const root = process.cwd();
@@ -392,15 +392,7 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
 `,
     "utf8",
   );
-  const build = spawnSync(
-    "npx",
-    ["--no-install", "esbuild", entryPath, "--bundle", "--platform=node", "--format=esm", `--outfile=${bundlePath}`, "--log-level=warning"],
-    { cwd: root, encoding: "utf8" },
-  );
-  if (build.status !== 0) {
-    console.error(build.stderr || build.stdout);
-    process.exit(1);
-  }
+  await bundleTs(entryPath, bundlePath, { alias: false });
   const { api } = await import(pathToFileURL(bundlePath).href);
 
   // ------------------------------------------------------- 1. dựng dữ liệu --

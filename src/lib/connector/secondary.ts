@@ -43,10 +43,43 @@ export type SearchHit = {
   snippet: string;
 };
 
-/** Chọn nhà cung cấp search: chỉ dùng khi có khoá, và chỉ khi người dùng cấu hình. */
-export function resolveProvider(apiKey?: string, explicit?: SearchProvider): SearchProvider | null {
+/**
+ * Tiền tố khoá **nhận ra được** của từng nhà cung cấp.
+ *
+ * Chỉ Tavily có tiền tố đủ đặc trưng để tin (`tvly-`). Khoá Serper là chuỗi hex,
+ * khoá Brave là chuỗi chữ-số — đoán hai loại đó từ hình dạng là đoán mò, nên
+ * không đoán: người dùng đặt `SEARCH_PROVIDER`, hoặc mặc định về serper.
+ */
+const KEY_PREFIXES: [string, SearchProvider][] = [["tvly-", "tavily"]];
+
+/** Suy nhà cung cấp từ khoá. Trả null khi không nhận ra — không đoán bừa. */
+export function providerFromKey(apiKey?: string | null): SearchProvider | null {
+  const key = (apiKey ?? "").trim();
+  if (!key) return null;
+  for (const [prefix, provider] of KEY_PREFIXES) {
+    if (key.startsWith(prefix)) return provider;
+  }
+  return null;
+}
+
+export function isSearchProvider(value: unknown): value is SearchProvider {
+  return value === "serper" || value === "tavily" || value === "brave";
+}
+
+/**
+ * Chọn nhà cung cấp search.
+ *
+ * Thứ tự: `SEARCH_PROVIDER` (đã chuẩn hoá chữ thường, chỉ nhận ba tên hợp lệ) →
+ * suy từ tiền tố khoá → serper. `SEARCH_PROVIDER` được ưu tiên vì nó là lời
+ * người dùng nói; nhưng khi người dùng quên đặt (chỉ dán khoá vào), tiền tố
+ * `tvly-` cứu được một ca rất dễ xảy ra: khoá Tavily gửi nhầm tới Serper thì
+ * nhà cung cấp trả lỗi, mà lỗi đó lại dễ bị đọc thành "khoá hỏng".
+ */
+export function resolveProvider(apiKey?: string | null, explicit?: string | null): SearchProvider | null {
   if (!apiKey) return null;
-  return explicit ?? "serper";
+  const named = (explicit ?? "").trim().toLowerCase();
+  if (isSearchProvider(named)) return named;
+  return providerFromKey(apiKey) ?? "serper";
 }
 
 type RawHit = { url?: string; title?: string; snippet?: string; description?: string; link?: string; name?: string; content?: string };
@@ -77,8 +110,13 @@ export function buildSearchRequest(domain: string, query: string, provider: Sear
       url: "https://api.tavily.com/search",
       init: {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ api_key: apiKey, query: scoped, max_results: 10, search_depth: "basic" }),
+        headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+        // Tavily **không** dùng toán tử `site:` như Google/Brave — nó lọc tên
+        // miền bằng tham số riêng. Vì vậy câu truy vấn vẫn mang `site:` (giữ
+        // nguyên luật của lớp này) và tên miền còn được nói thêm một lần bằng
+        // `include_domains`, để nhà cung cấp lọc trước khi trả về. Hàng rào thứ
+        // hai trong `parseSearchHits` vẫn giữ nguyên.
+        body: JSON.stringify({ query: scoped, max_results: 10, search_depth: "basic", include_domains: [domain] }),
       },
     };
   }
@@ -93,14 +131,37 @@ export function buildSearchRequest(domain: string, query: string, provider: Sear
  * Đọc kết quả trả về thành các trang **cùng tên miền**. Hàng rào này giữ cả khi
  * nhà cung cấp trả về kết quả ngoài tên miền dù câu truy vấn đã có `site:`.
  */
-export function parseSearchHits(payload: unknown, provider: SearchProvider, domain: string): SearchHit[] {
+function rawRows(payload: unknown, provider: SearchProvider): RawHit[] {
   const body = (payload ?? {}) as Record<string, unknown>;
-  const rows: RawHit[] =
-    provider === "serper"
-      ? ((body.organic as RawHit[]) ?? [])
-      : provider === "tavily"
-        ? ((body.results as RawHit[]) ?? [])
-        : (((body.web as { results?: RawHit[] } | undefined)?.results as RawHit[]) ?? []);
+  return provider === "serper"
+    ? ((body.organic as RawHit[]) ?? [])
+    : provider === "tavily"
+      ? ((body.results as RawHit[]) ?? [])
+      : (((body.web as { results?: RawHit[] } | undefined)?.results as RawHit[]) ?? []);
+}
+
+/**
+ * Phản hồi này có **đúng hình dạng** kết quả tìm kiếm của nhà cung cấp không?
+ *
+ * Cần hàm này vì một nhà cung cấp có thể trả **HTTP 200 kèm thân lỗi** (sai khoá,
+ * sai endpoint). Khi đó "HTTP 200" không phải bằng chứng đã nối được, mà
+ * `parseSearchHits` lại trả về mảng rỗng — dễ bị đọc thành "nối được nhưng không
+ * có kết quả". Không có mảng kết quả ⇒ không phải phản hồi tìm kiếm.
+ */
+export function hasSearchShape(payload: unknown, provider: SearchProvider): boolean {
+  const body = (payload ?? {}) as Record<string, unknown>;
+  if (provider === "serper") return Array.isArray(body.organic);
+  if (provider === "tavily") return Array.isArray(body.results);
+  return Array.isArray((body.web as { results?: unknown } | undefined)?.results);
+}
+
+/** Số dòng nhà cung cấp trả về, **trước** hàng rào tên miền. */
+export function countProviderRows(payload: unknown, provider: SearchProvider): number {
+  return rawRows(payload, provider).length;
+}
+
+export function parseSearchHits(payload: unknown, provider: SearchProvider, domain: string): SearchHit[] {
+  const rows = rawRows(payload, provider);
 
   const hits: SearchHit[] = [];
   for (const row of rows) {

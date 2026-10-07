@@ -17,9 +17,9 @@
 
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { readdirSync, readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { bundleTs } from "./lib/ts-module.mjs";
 import { PGlite } from "@electric-sql/pglite";
 
 const root = process.cwd();
@@ -94,15 +94,7 @@ export const api = { reverifyChannel, reverifyChannels, valueAppears, evidenceLi
 `,
     "utf8",
   );
-  const build = spawnSync(
-    "npx",
-    ["--no-install", "esbuild", entryPath, "--bundle", "--platform=node", "--format=esm", "--alias:@=./src", `--outfile=${bundlePath}`, "--log-level=warning"],
-    { cwd: root, encoding: "utf8" },
-  );
-  if (build.status !== 0) {
-    console.error(build.stderr || build.stdout);
-    process.exit(1);
-  }
+  await bundleTs(entryPath, bundlePath);
   const { api } = await import(pathToFileURL(bundlePath).href);
 
   // ---------------------------------------------------- 1. phần thuần --------

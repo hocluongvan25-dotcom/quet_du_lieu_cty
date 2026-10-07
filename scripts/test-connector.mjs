@@ -9,9 +9,9 @@
  */
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import zlib from "node:zlib";
-import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { bundleTs } from "./lib/ts-module.mjs";
 
 const root = process.cwd();
 const workDir = path.join(root, ".connector-test");
@@ -100,24 +100,16 @@ import { buildBuyerWriteBatch } from "@/lib/connector/persist";
 import { toE164, whatsappLink, isE164, resolveCountry } from "@/lib/connector/phone";
 import { readSitemap } from "@/lib/connector/sitemap";
 import { coverageOf, secondaryReason } from "@/lib/connector/gate";
-import { searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry } from "@/lib/connector/secondary";
+import { searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry } from "@/lib/connector/secondary";
 import { buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck } from "@/lib/connector/whatsapp";
 
-export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, lookupCompaniesHouse, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, lookupSecEdgar, lookupRegistry, registriesForCountry };
+export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, lookupSecEdgar, lookupRegistry, registriesForCountry };
 `;
   await mkdir(workDir, { recursive: true });
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
 
   const bundlePath = path.join(workDir, "bundle.mjs");
-  const build = spawnSync(
-    "npx",
-    ["--no-install", "esbuild", path.join(workDir, "entry.ts"), "--bundle", "--platform=node", "--format=esm", "--alias:@=./src", `--outfile=${bundlePath}`, "--log-level=warning"],
-    { cwd: root, encoding: "utf8" },
-  );
-  if (build.status !== 0) {
-    console.error(build.stderr || build.stdout);
-    process.exit(1);
-  }
+  await bundleTs(path.join(workDir, "entry.ts"), bundlePath);
 
   const { api } = await import(pathToFileURL(bundlePath).href);
 
@@ -494,7 +486,11 @@ async function runChecks(api, files) {
   const serperRequest = api.buildSearchRequest("acmespices.co.uk", "supplier registration", "serper", "k1");
   check("serper: POST, khoá ở header", /google\.serper\.dev/.test(serperRequest.url) && serperRequest.init.headers["x-api-key"] === "k1");
   const tavilyRequest = api.buildSearchRequest("acmespices.co.uk", "supplier registration", "tavily", "k2");
-  check("tavily: POST, khoá trong body đúng như nhà cung cấp yêu cầu", JSON.parse(String(tavilyRequest.init.body)).api_key === "k2");
+  check("tavily: POST, khoá ở header Bearer, không nằm trong body", tavilyRequest.init.headers.authorization === "Bearer k2" && !String(tavilyRequest.init.body).includes("k2"));
+  check(
+    "tavily: nói tên miền bằng include_domains, vì Tavily không lọc theo site: như Google",
+    JSON.stringify(JSON.parse(String(tavilyRequest.init.body)).include_domains) === JSON.stringify(["acmespices.co.uk"]),
+  );
   const braveRequest = api.buildSearchRequest("acmespices.co.uk", "supplier registration", "brave", "k3");
   check("brave: GET, khoá ở header riêng", braveRequest.init.method === undefined && braveRequest.init.headers["x-subscription-token"] === "k3" && braveRequest.url.includes("api.search.brave.com"));
   check("cả ba đều luôn có site: trong truy vấn", [serperRequest, tavilyRequest, braveRequest].every((request) => JSON.stringify(request.init.body ?? decodeURIComponent(request.url)).includes("site:acmespices.co.uk")));
@@ -518,6 +514,32 @@ async function runChecks(api, files) {
   );
   check("payload rỗng không làm gãy", api.parseSearchHits(undefined, "serper", "acmespices.co.uk").length === 0);
   check("không nêu nhà cung cấp thì mặc định serper", api.resolveProvider("k", undefined) === "serper" && api.resolveProvider(undefined, "brave") === null);
+  check(
+    "khoá Tavily được nhận ra từ tiền tố tvly-, không cần cấu hình",
+    api.providerFromKey("tvly-dev-abc123") === "tavily" && api.resolveProvider("tvly-dev-abc123") === "tavily",
+  );
+  check(
+    "không đoán nhà cung cấp từ hình dạng khoá lạ",
+    api.providerFromKey("khoa-hex-40-ky-tu") === null && api.providerFromKey("") === null && api.resolveProvider("khoa-hex") === "serper",
+  );
+  check(
+    "SEARCH_PROVIDER được ưu tiên, kể cả khi ngược tiền tố; chữ hoa và khoảng trắng đều chấp nhận",
+    api.resolveProvider("tvly-dev-abc", "serper") === "serper" &&
+      api.resolveProvider("k", " Tavily ") === "tavily" &&
+      api.resolveProvider("k", "khong-ton-tai") === "serper",
+  );
+
+  section("phản hồi 200 kèm thân lỗi không được coi là đã nối được");
+  const serperErrorBody = { message: "Unauthorized" };
+  check(
+    "thân lỗi không có mảng kết quả ⇒ không phải phản hồi tìm kiếm",
+    api.hasSearchShape(serperErrorBody, "serper") === false &&
+      api.hasSearchShape({ organic: [] }, "serper") === true &&
+      api.hasSearchShape({ results: [] }, "tavily") === true &&
+      api.hasSearchShape({ web: { results: [] } }, "brave") === true,
+  );
+  check("đếm được số dòng thô trước hàng rào tên miền", api.countProviderRows({ organic: [{ link: "https://a.example/x" }, { link: "https://b.example/y" }] }, "serper") === 2);
+  check("thân lỗi đếm ra 0 dòng và không sinh kết quả", api.countProviderRows(serperErrorBody, "serper") === 0 && api.parseSearchHits(serperErrorBody, "serper", "acmespices.co.uk").length === 0);
 
 
   section("kiểm số có WhatsApp: hai câu hỏi, không gửi tin nhắn nào");

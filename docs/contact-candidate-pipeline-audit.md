@@ -46,7 +46,7 @@ Thiết kế dùng 3 trạng thái; hệ thống đang dùng 2 trục (quan sát
 
 ## D. Chỗ lệch lớn nhất: chưa khép kín vòng lưu dữ liệu — **đã xử lý 07/10/2026**
 
-`POST /api/connector` chạy xong trả JSON và tự khai `persisted: false` (`src/app/api/connector/route.ts:78`). Không có `insert` nào vào `contact_channels`, `contact_candidates`, `decision_makers` hay `buyer_profiles` — trong toàn bộ `src/` chỉ có 3 chỗ ghi database: `company_reports`, `source_evidence` (`src/app/api/research/route.ts:196,204`) và `organization_members` (`src/app/api/team/invite/route.ts:103`).
+`POST /api/connector` chạy xong trả JSON và tự khai `persisted: false` (`src/app/api/connector/route.ts:78`). Không có `insert` nào vào `contact_channels`, `contact_candidates`, `decision_makers` hay `buyer_profiles` — trong toàn bộ `src/` chỉ có 3 chỗ ghi database: `company_reports`, `source_evidence` (`src/app/api/research/route.ts:196,211`) và `organization_members` (`src/app/api/team/invite/route.ts:103`).
 
 Nghĩa là: **trích xuất thì có bằng chứng, nhưng chưa có gì lưu bằng chứng ấy.** Đây là việc lớn nhất còn thiếu, và nó đứng trước cả 5 cổng — vì cổng là quy tắc trên dữ liệu đã lưu.
 

@@ -608,7 +608,7 @@ Một số muốn vừa giữ app vừa cắm Cloud API thì Meta có **Coexiste
 
 ### Kiểm chứng
 
-- `npm run connector:test` — 204 check ở vòng 012 (120 ở vòng này), thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
+- `npm run connector:test` — 211 check ở vòng 012 (120 ở vòng này), thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
 - `npm run persist:test` — 63 check: E.164 được lưu đúng, `has_whatsapp` là `null` sau khi connector ghi, view WhatsApp trống khi chưa kiểm, rồi mô phỏng kết quả kiểm → view trả `https://wa.me/17074522800`, và hai ràng buộc mới bị database từ chối thi hành.
 
 ---
@@ -745,6 +745,12 @@ Vì vậy ba nhà cung cấp ở trên là đường còn sống, và **đổi n
 
 **`npm run search:check`** gọi **đúng request mà connector dựng** (cùng hai hàm đó) tới một tên miền công khai để trả lời "khoá có chạy không" bằng phép đo, không bằng niềm tin. Không có khoá: in ra ba nhà cung cấp kèm gói miễn phí và hai dòng cần thêm vào `.env.local`, rồi thoát 0 — vì chạy thiếu bước 3 là trạng thái bình thường. Có khoá mà lỗi (401/403/429/mạng): thoát 1 kèm lý do.
 
+**Khoá Tavily tự nhận ra (07/10/2026).** `resolveProvider` đọc `SEARCH_PROVIDER` trước (chuẩn hoá chữ thường, chỉ nhận ba tên hợp lệ); không có thì suy từ tiền tố khoá — `tvly-` là Tavily, còn lại mặc định serper. Lý do: một khoá Tavily dán vào mà quên `SEARCH_PROVIDER` sẽ bị gửi tới `google.serper.dev`, và cái sai đó dễ bị đọc thành "khoá hỏng". Lệnh kiểm còn **cảnh báo** khi người dùng đặt rõ một nhà cung cấp khác với tiền tố khoá.
+
+**Tavily không lọc theo `site:`.** Toán tử `site:` là quy ước của Google/Brave; Tavily lọc tên miền bằng tham số riêng. Vì vậy request gửi tới Tavily mang theo `include_domains: [<tên miền công ty>]` bên cạnh `site:` trong câu truy vấn — luật "chỉ trong tên miền của họ" được nói thêm một lần nữa ở phía nhà cung cấp, còn hàng rào thứ hai trong `parseSearchHits` không đổi.
+
+**HTTP 200 chưa phải bằng chứng đã nối được.** Một nhà cung cấp có thể trả 200 kèm thân lỗi (sai khoá, sai endpoint), và khi đó mảng kết quả rỗng rất dễ bị đọc thành "nối được nhưng không có kết quả". `hasSearchShape` bắt đúng ca đó: không có mảng kết quả đúng hình dạng (`organic` / `results` / `web.results`) thì kết luận là **chưa nối được**, kèm thân phản hồi nguyên văn.
+
 Gói miễn phí để bắt đầu, theo công bố của chính các nhà cung cấp (09/2026): Serper ~2.500 câu thử rồi ~1 USD/1.000 câu; Tavily 1.000 credit/tháng; Brave 5 USD credit/tháng (~1.000 câu, tức về sau 5 USD/1.000 câu). **Serper rẻ nhất nhưng không phải index độc lập** — nó trả kết quả Google; Brave có index riêng. Với cùng một lớp chỉ-dùng-URL, cả ba đều đủ.
 
 
@@ -776,7 +782,7 @@ Với `SEARCH_API_KEY` / `SEARCH_PROVIDER` / `COMPANIES_HOUSE_API_KEY` đặt tr
 
 ### Kiểm chứng
 
-`npm run connector:test` — **204 check** ở vòng 012 (182 ở vòng này, 120 trước đó): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá, hình dạng request/kết quả của cả ba nhà cung cấp, kết quả hỏng bị bỏ), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
+`npm run connector:test` — **211 check** ở vòng 012 (182 ở vòng này, 120 trước đó): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá, hình dạng request/kết quả của cả ba nhà cung cấp, kết quả hỏng bị bỏ), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
 
 ### Kèm theo: `info@` không còn bị xếp là email bộ phận
 
