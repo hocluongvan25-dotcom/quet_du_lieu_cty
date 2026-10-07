@@ -8,7 +8,7 @@
  *
  *  1. Dựng dữ liệu (hàm thuần): thiếu gì thì từ chối, thừa gì thì bỏ, và
  *     không bao giờ sinh email theo pattern.
- *  2. Ghi thật vào Postgres trong tiến trình (PGlite) với đúng 8 migration,
+ *  2. Ghi thật vào Postgres trong tiến trình (PGlite) với đúng 9 migration,
  *     rồi đọc lại qua chính các view mà ứng dụng dùng
  *     (`contact_export_policy`, `buyer_outreach_summary`, `outreach_ready_contacts`).
  *
@@ -191,10 +191,10 @@ function pgliteStore(db) {
       for (const row of rows) {
         const result = await db.query(
           `insert into public.decision_makers
-             (organization_id, buyer_profile_id, market_source_id, full_name, job_title, department, grade, source_url, corroboration_count)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             (organization_id, buyer_profile_id, market_source_id, full_name, job_title, role_kind, department, grade, source_url, corroboration_count)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
            returning id, full_name`,
-          [row.organization_id, row.buyer_profile_id, row.market_source_id, row.full_name, row.job_title, row.department, row.grade, row.source_url, row.corroboration_count],
+          [row.organization_id, row.buyer_profile_id, row.market_source_id, row.full_name, row.job_title, row.role_kind ?? "unknown", row.department, row.grade, row.source_url, row.corroboration_count],
         );
         out.push(result.rows[0]);
       }
@@ -216,8 +216,8 @@ function pgliteStore(db) {
         await db.query(
           `insert into public.contact_channels
              (organization_id, buyer_profile_id, market_source_id, decision_maker_id, channel_type, value, provenance,
-              certainty, discovered_by, identity_match, source_url, evidence_snippet, phone_e164, is_verified, is_public)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+              certainty, discovered_by, identity_match, email_kind, source_url, evidence_snippet, phone_e164, is_verified, is_public)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
           [
             row.organization_id,
             row.buyer_profile_id,
@@ -229,6 +229,7 @@ function pgliteStore(db) {
             row.certainty,
             row.discovered_by,
             row.identity_match,
+            row.email_kind ?? "unknown",
             row.source_url,
             row.evidence_snippet,
             row.phone_e164 ?? null,
@@ -385,9 +386,9 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   check("mỗi đường vào đều có nguồn", batch.routes.every((route) => route.source_url.startsWith("http")));
 
   // ------------------------------------------------- 2. ghi vào Postgres thật --
-  section("ghi vào Postgres thật (PGlite, đủ 8 migration)");
+  section("ghi vào Postgres thật (PGlite, đủ 9 migration)");
   const { db, migrationCount } = await bootDatabase();
-  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 8, String(migrationCount));
+  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 9, String(migrationCount));
 
   await db.query(
     `insert into auth.users (id, email, raw_user_meta_data)
@@ -552,7 +553,7 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
       `insert into public.contact_channels
          (organization_id, buyer_profile_id, market_source_id, channel_type, value, provenance, discovered_by, source_url)
        values ($1, $2, $3, 'email', 'unquoted@acme.example', 'company_site', 'manual', 'https://acme.example/contact')`,
-      [batch.organizationId, buyerRow.id, websiteSourceId],
+      [realOrgId, buyerRow.id, websiteSourceId],
     );
   } catch (error) {
     quoteRefused = error.message;
@@ -566,12 +567,71 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
       `insert into public.contact_channels
          (organization_id, buyer_profile_id, market_source_id, channel_type, value, provenance, discovered_by, source_url, evidence_snippet)
        values ($1, $2, $3, 'linkedin_url', 'linkedin.com/in/someone-else', 'company_site', 'manual', 'https://acme.example/team', 'Liên kết trên acme.example')`,
-      [batch.organizationId, buyerRow.id, websiteSourceId],
+      [realOrgId, buyerRow.id, websiteSourceId],
     );
   } catch (error) {
     profileRefused = error.message;
   }
   check("database từ chối hồ sơ cá nhân đứng một mình", profileRefused.includes("contact_channels_personal_profile_needs_person"), profileRefused);
+
+  // ------------------------------------------- 4. cổng Role + Email (009) ----
+  section("cổng Role và cổng Email");
+  const roleRow = (
+    await db.query("select role_kind, job_title from public.decision_makers where buyer_profile_id = $1", [buyerRow.id])
+  ).rows[0];
+  check("chức danh được phân loại lúc ghi", roleRow?.role_kind === "procurement", JSON.stringify(roleRow));
+
+  const emailKinds = (
+    await db.query("select value, email_kind, identity_match from public.contact_channels where buyer_profile_id = $1 and channel_type = 'email' order by value", [buyerRow.id])
+  ).rows;
+  check(
+    "email cạnh tên người → published_named; email bộ phận → published_role_mailbox",
+    emailKinds.find((row) => row.value === "dana.whitfield@acme.example")?.email_kind === "published_named" &&
+      emailKinds.find((row) => row.value === "procurement@acme.example")?.email_kind === "published_role_mailbox",
+    JSON.stringify(emailKinds),
+  );
+  check("kênh không phải email thì email_kind là unknown", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1 and channel_type <> 'email' and email_kind <> 'unknown'", [buyerRow.id])).rows[0].n === 0);
+
+  const roleGate = (
+    await db.query("select passes_role_gate from public.contact_role_gate where channel_id = $1", [quotedChannelId])
+  ).rows[0];
+  check("email bộ phận qua cổng Role (đường bộ phận, không cần tên người)", roleGate?.passes_role_gate === true, JSON.stringify(roleGate));
+
+  const emailGateRows = (
+    await db.query("select value, passes_email_gate, blocked_reason from public.contact_email_gate where buyer_profile_id = $1 order by value", [buyerRow.id])
+  ).rows;
+  check(
+    "mọi email công bố đều qua cổng Email",
+    emailGateRows.filter((row) => row.value.includes("@")).every((row) => row.passes_email_gate === true),
+    JSON.stringify(emailGateRows),
+  );
+  check("không có email nào bị loại vì inferred_unverified", emailGateRows.every((row) => row.blocked_reason !== "inferred_unverified"));
+
+  // Một email tự đoán: cổng Email phải chặn, và cột email_kind phải khớp identity.
+  const guessedChannelId = (
+    await db.query(
+      `insert into public.contact_channels
+         (organization_id, buyer_profile_id, market_source_id, channel_type, value, provenance, certainty, discovered_by,
+          inference_basis, identity_match, email_kind, expires_at)
+       values ($1, $2, $3, 'email', 'guessed@acme.example', 'company_site', 'inferred', 'inferred_pattern',
+               'first.last@domain', 'unknown', 'inferred_unverified', now() + interval '20 days')
+       returning id`,
+      [realOrgId, buyerRow.id, websiteSourceId],
+    )
+  ).rows[0].id;
+  const guessedGate = (
+    await db.query("select passes_email_gate, blocked_reason from public.contact_email_gate where channel_id = $1", [guessedChannelId])
+  ).rows[0];
+  check("email tự đoán bị cổng Email chặn", guessedGate?.passes_email_gate === false && guessedGate?.blocked_reason === "inferred_unverified", JSON.stringify(guessedGate));
+
+  let inconsistentKind = "";
+  try {
+    await db.query("update public.contact_channels set email_kind = 'published_named' where id = $1", [guessedChannelId]);
+  } catch (error) {
+    inconsistentKind = error.message;
+  }
+  check("không thể gán nhãn sai cho một email đã đoán", inconsistentKind.includes("contact_channels_email_kind_consistent"), inconsistentKind);
+  await db.query("delete from public.contact_channels where id = $1", [guessedChannelId]);
 
   check(
     "xác minh và kiểm mailbox không tạo thêm dòng nào",

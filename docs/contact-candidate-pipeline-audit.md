@@ -3,7 +3,7 @@
 Ngày kiểm: 06/10/2026. Người kiểm: đối chiếu trực tiếp schema + code trong repo, không đọc từ trí nhớ.
 Mọi dòng dưới đây ghi kèm `file:dòng` để tự kiểm lại.
 
-**Cập nhật 07/10/2026 — việc #1 và #2 ở mục E đã xong.** Tầng ghi kết quả connector vào database đã được viết (`src/lib/connector/persist.ts`), nối vào `POST /api/connector`, và kiểm bằng `npm run persist:test` (46 check, ghi vào Postgres thật rồi đọc lại qua chính view của ứng dụng). Chi tiết: spec §17. Việc #2 (siết bằng chứng ở tầng DB) cũng xong trong cùng ngày — migration 007, spec §18. Các mục 3–6 ở phần E vẫn còn nguyên.
+**Cập nhật 07/10/2026 — việc #1, #2 và #3 ở mục E đã xong.** Tầng ghi kết quả connector vào database đã được viết (`src/lib/connector/persist.ts`), nối vào `POST /api/connector`, và kiểm bằng `npm run persist:test` (46 check, ghi vào Postgres thật rồi đọc lại qua chính view của ứng dụng). Chi tiết: spec §17. Việc #2 (siết bằng chứng ở tầng DB) cũng xong trong cùng ngày — migration 007, spec §18. Việc #3 (enum `role_kind` / `email_kind`) cũng xong — spec §20. Các mục 4–6 ở phần E vẫn còn nguyên.
 
 ## Trả lời ngắn
 
@@ -56,7 +56,7 @@ Nghĩa là: **trích xuất thì có bằng chứng, nhưng chưa có gì lưu b
 
 1. ~~**Ghi kết quả connector vào DB**~~ — **xong 07/10/2026** (`src/lib/connector/persist.ts`, spec §17, `npm run persist:test`). Việc này gồm: upsert `buyer_profiles` theo `domain`, ghi `contact_channels` (`value`, `channel_type`, `identity_match`, `certainty`, `source_url`, `evidence_snippet`, `discovered_by = 'web_research_agent'`), ghi người vào `decision_makers`, ghi form/vendor registration vào `buyer_routes`. Ghi kèm `report.requirements` đã có.
 2. ~~**Siết bằng chứng ở tầng DB**~~ — **xong 07/10/2026** (migration `007_evidence_is_required.sql`, spec §18, 7 check mới trong `npm run db:verify`). Nội dung: hiện `evidence_snippet` còn cho phép NULL; nếu muốn đúng thiết kế "bắt buộc evidence" thì thêm ràng buộc `certainty = 'confirmed' ⇒ evidence_snippet khác rỗng` (source_url đã bắt buộc rồi).
-3. **Cổng Role + Email thành cổng thật**: thêm enum `role_kind` (procurement/purchasing/sourcing/sales/other) và `email_kind` (`published_named` / `published_role_mailbox` / `inferred_unverified`) để cổng có thứ để chặn, thay vì suy từ local part mỗi lần.
+3. ~~**Cổng Role + Email thành cổng thật**~~ — **xong 07/10/2026** (migration `009_role_and_email_gates.sql`, spec §20, `npm run roles:test` 33 check). Nội dung: thêm enum `role_kind` (procurement/purchasing/sourcing/sales/other) và `email_kind` (`published_named` / `published_role_mailbox` / `inferred_unverified`) để cổng có thứ để chặn, thay vì suy từ local part mỗi lần.
 4. **Job re-verify 90–180 ngày**: đọc lại đúng nguồn cũ, cập nhật `verified_at` / `last_seen_at`, ghi thay đổi; hết hạn thì rơi khỏi view export.
 5. **Nguồn cấp 2**: search API `site:domain`, Companies House/SEC, trade show directory (theo spec §14 — đều miễn phí trừ khi mua dữ liệu).
 6. **Resolve pháp nhân từ tờ khai hải quan**: chỉ làm được sau khi cắm dữ liệu hải quan (Volza/ImportYeti/Panjiva), tức là việc có ngân sách.

@@ -587,3 +587,56 @@ Một dòng `channel_type = 'whatsapp'` là **kênh công bố sẵn** (link `wa
 
 - `npm run connector:test` — 120 check, thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
 - `npm run persist:test` — 63 check: E.164 được lưu đúng, `has_whatsapp` là `null` sau khi connector ghi, view WhatsApp trống khi chưa kiểm, rồi mô phỏng kết quả kiểm → view trả `https://wa.me/17074522800`, và hai ràng buộc mới bị database từ chối thi hành.
+
+---
+
+## 20. Cổng Role và cổng Email thành ràng buộc (07/10/2026)
+
+Hai cổng còn lại của thiết kế chuẩn giờ có chỗ đứng trong dữ liệu. Trước đây cả hai câu hỏi chỉ được suy lại từ chuỗi chức danh ở mỗi chỗ dùng — `TITLE_WORDS` trong `extract.ts`, `search-roles.ts`, rồi tới UI — nên mỗi nơi trả lời một kiểu, và **không có gì để chặn**.
+
+### Cổng Role: `role_kind` trên `decision_makers`
+
+`src/lib/roles.ts` phân loại một lần lúc ghi, lưu vào cột, và mọi chỗ đọc cùng một giá trị.
+
+| Nhóm | Gồm |
+| --- | --- |
+| **Mua hàng** (qua cổng) | `procurement`, `purchasing`, `sourcing`, `supply_chain` |
+| Khác | `quality`, `logistics`, `sales`, `management` |
+| Không kết luận | `other` (có chức danh, không khớp nhóm), `unknown` (chưa có chức danh) |
+
+Ba giá trị đầu đúng như thiết kế nêu; `supply_chain` được cộng vào vì ở nhiều công ty thực phẩm người quyết định mua nằm ở bộ phận này.
+
+**Thứ tự ưu tiên là chỗ dễ sai nhất, nên nó được khoá bằng test:** kiểm nhóm cụ thể trước nhóm chung, nếu không thì "Procurement Director" thành `management` và "Sales Director" thành `management`. Một chi tiết nữa: chức danh cụ thể thắng bộ phận ("Sales Manager" ở bộ phận Procurement vẫn là `sales`), nhưng chức danh chung chung thì **không** ("Manager" ở bộ phận Procurement là `procurement`) — đó là lúc bộ phận mới nói lên điều gì.
+
+`other` và `unknown` **không được gộp**: một cái là "có dữ liệu, không dùng được", cái kia là "thiếu dữ liệu". Người đọc cần phân biệt.
+
+### Cổng Email: `email_kind`, và vì sao không đổi tên `identity_match`
+
+Ba nhãn của thiết kế được thêm dưới dạng enum `email_kind`, nhưng **`identity_match` (006) được giữ nguyên** — nó đang chạy ở view, loader và CSV. Hai cột trả lời hai câu khác nhau:
+
+| Câu hỏi | Cột |
+| --- | --- |
+| Địa chỉ này **của ai**? | `identity_match` — `person` / `department` / `company_general` / `unknown` |
+| Địa chỉ này **được công bố thế nào**? | `email_kind` — `published_named` / `published_role_mailbox` / `inferred_unverified` / `unknown` |
+
+Ánh xạ (được viết thành hàm `email_kind_for` trong SQL, và một ràng buộc buộc cột phải khớp với nó):
+
+```
+certainty = inferred                      → inferred_unverified
+identity_match = person                  → published_named
+identity_match = department|company_general → published_role_mailbox
+```
+
+Nhãn `inferred_unverified` là nhãn duy nhất bị cổng Email chặn — đúng như thiết kế. Hộp thư bộ phận công bố **không** bị chặn: nó được công bố, không phải đoán.
+
+### Hai cổng, hai view
+
+`contact_role_gate` và `contact_email_gate` **tách khỏi** `contact_export_policy` (006) là cố ý: `contact_export_policy` là luật **xuất** (được ra CSV hay không), cổng là luật **chọn** (có phải đầu mối mua hàng không — có nên gọi không). Cái thứ hai là quyết định của người dùng, không phải của hệ thống (spec §10).
+
+Trong `contact_role_gate`, kênh **không gắn với người nào** tự động qua cổng: đó là đường bộ phận, và thiết kế đã chốt là đi cửa bộ phận trước khi cần tên người.
+
+### Kiểm chứng
+
+- `npm run roles:test` (**33 check**, bộ mới): các ca dễ sai — "Procurement Director" vs "Sales Director" vs "Import Manager", chức danh chung chung + bộ phận cụ thể, tiếng Việt có dấu, `other` ≠ `unknown`, và nhãn hiển thị không mang lời khuyên.
+- `npm run persist:test` (**71 check**): chức danh được phân loại lúc ghi (`Procurement Manager` → `procurement`); email cạnh tên người → `published_named`, email bộ phận → `published_role_mailbox`; email tự đoán bị cổng Email chặn; DB từ chối một `email_kind` nói ngược với cách địa chỉ được công bố.
+- `npm run db:verify` (9 migration): hàm `email_kind_for` trả đúng ba nhãn; cổng Role đổi kết quả khi chức danh đổi từ `sales` sang `procurement`; kênh không gắn người vẫn qua; email chưa phân loại được thì bị giữ lại kèm lý do; hai view mới vẫn cách ly theo workspace.

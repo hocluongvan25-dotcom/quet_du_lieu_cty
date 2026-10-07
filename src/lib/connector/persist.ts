@@ -21,6 +21,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { classifyRole, type RoleKind } from "@/lib/roles";
 import { isE164 } from "./phone";
 import type { ConnectorResult, FoundChannel } from "./types";
 
@@ -28,6 +29,8 @@ import type { ConnectorResult, FoundChannel } from "./types";
 // Chép đúng enum trong 005/006. Sai một chữ là insert hỏng, nên test đối chiếu
 // danh sách này với chính file migration.
 export type ChannelTypeDb = "email" | "phone" | "form" | "linkedin_url" | "whatsapp" | "portal";
+/** Đúng bằng enum public.email_kind (009). */
+export type EmailKindDb = "published_named" | "published_role_mailbox" | "inferred_unverified" | "unknown";
 export type IdentityMatchDb = "person" | "department" | "company_general" | "unknown";
 export type RouteKindDb =
   | "vendor_registration"
@@ -62,6 +65,8 @@ export type BatchChannel = {
    * `value` vẫn giữ nguyên số như đã công bố.
    */
   phone_e164: string | null;
+  /** Cách địa chỉ email này được công bố (cổng Email, 009). Không phải email → `unknown`. */
+  email_kind: EmailKindDb;
   /** Vị trí trong `people` khi kênh được công bố ngay cạnh tên một người. */
   personIndex: number | null;
 };
@@ -69,6 +74,8 @@ export type BatchChannel = {
 export type BatchPerson = {
   full_name: string;
   job_title: string | null;
+  /** Nhóm chức danh, phân loại một lần ở đây (cổng Role, 009). */
+  role_kind: RoleKind;
   source_url: string;
   evidence_snippet: string;
 };
@@ -201,6 +208,8 @@ export function buildBuyerWriteBatch(
     people.push({
       full_name: fullName,
       job_title: person.title ? clean(person.title) : null,
+      // Phân loại từ chính chữ đã công bố, lúc ghi — không suy lại ở mỗi chỗ đọc.
+      role_kind: classifyRole(person.title),
       source_url: person.sourceUrl,
       evidence_snippet: clean(person.evidenceSnippet) || fullName,
     });
@@ -264,15 +273,28 @@ export function buildBuyerWriteBatch(
       skipped.push({ value: channel.e164, reason: "số chuẩn hoá không đúng dạng E.164" });
     }
 
+    // Kênh công bố ngay cạnh tên một người là kênh của người đó — nhưng chỉ khi
+    // người đó có trong `people`; nếu không thì hạ về mức công ty chung, không
+    // gán bừa cho ai.
+    const identityMatch = (personIndex === null && channel.identityMatch === "person" ? "company_general" : channel.identityMatch) as IdentityMatchDb;
+    const certainty = channel.certainty === "probable" ? "probable" : "confirmed";
+
     channels.push({
       channel_type: channelType,
       phone_e164: channelType === "phone" ? e164 : null,
+      // Ba nhãn của cổng Email, suy từ đúng hai trục vừa chốt — để cột
+      // email_kind không bao giờ nói ngược lại identity_match.
+      email_kind:
+        channelType !== "email"
+          ? "unknown"
+          : identityMatch === "person"
+            ? "published_named"
+            : identityMatch === "department" || identityMatch === "company_general"
+              ? "published_role_mailbox"
+              : "unknown",
       value,
-      // Kênh công bố ngay cạnh tên một người là kênh của người đó — nhưng chỉ
-      // khi người đó có trong `people`; nếu không thì hạ về mức công ty chung,
-      // không gán bừa cho ai.
-      identity_match: (personIndex === null && channel.identityMatch === "person" ? "company_general" : channel.identityMatch) as IdentityMatchDb,
-      certainty: channel.certainty === "probable" ? "probable" : "confirmed",
+      identity_match: identityMatch,
+      certainty,
       source_url: sourceUrl,
       evidence_snippet: evidence,
       personIndex,
@@ -385,6 +407,7 @@ export async function saveBuyerDiscovery(store: BuyerStore, batch: BuyerWriteBat
         ...base,
         full_name: person.full_name,
         job_title: person.job_title,
+        role_kind: person.role_kind,
         department: null,
         // Hạng b: có tên, một nguồn công khai. Hạng a dành cho nguồn chính thức
         // đối chiếu được (sổ đăng ký), hạng c là tín hiệu chức danh không tên.
@@ -418,6 +441,7 @@ export async function saveBuyerDiscovery(store: BuyerStore, batch: BuyerWriteBat
         certainty: channel.certainty,
         discovered_by: "web_research_agent",
         identity_match: channel.identity_match,
+        email_kind: channel.email_kind,
         source_url: channel.source_url,
         evidence_snippet: channel.evidence_snippet,
         phone_e164: channel.phone_e164,

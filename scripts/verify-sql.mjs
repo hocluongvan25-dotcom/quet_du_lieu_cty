@@ -603,6 +603,56 @@ check("members cannot add contact channels from the client", clientChannelWrite.
 
 const verifyFromClient = await expectFailure("select public.verify_contact_channel(gen_random_uuid())", [], "permission denied");
 check("members cannot mark a channel verified from the client", verifyFromClient.ok, verifyFromClient.message);
+await db.query("reset role");
+
+// --- 009: cổng Role và cổng Email -------------------------------------------
+section("cổng Role và cổng Email (009)");
+check(
+  "ba nhãn của Email Gate suy đúng từ hai trục",
+  (await db.query("select public.email_kind_for('person', 'confirmed') as a, public.email_kind_for('department', 'confirmed') as b, public.email_kind_for('company_general', 'confirmed') as c, public.email_kind_for('unknown', 'inferred') as d")).rows[0].a === "published_named" &&
+    (await db.query("select public.email_kind_for('department', 'confirmed') as b")).rows[0].b === "published_role_mailbox" &&
+    (await db.query("select public.email_kind_for('company_general', 'confirmed') as c")).rows[0].c === "published_role_mailbox" &&
+    (await db.query("select public.email_kind_for('unknown', 'inferred') as d")).rows[0].d === "inferred_unverified",
+);
+
+const mismatchedKind = await expectFailure(
+  `update public.contact_channels set email_kind = 'published_named' where value = 'd.whitfield@greatlakespackaging.example' and certainty = 'inferred'`,
+  [],
+  "contact_channels_email_kind_consistent",
+);
+check("không thể gán nhãn email ngược với cách địa chỉ được công bố", mismatchedKind.ok, mismatchedKind.message);
+
+// Cổng Role: kênh của người có chức danh bán hàng không qua được; đổi sang thu
+// mua thì qua. Kênh của bộ phận (không gắn người) luôn qua.
+await db.query("update public.decision_makers set role_kind = 'sales' where id = $1", [personId]);
+const salesGate = (await db.query("select passes_role_gate from public.contact_role_gate where channel_id = $1", [foundProfile.rows[0].id])).rows[0];
+check("kênh của người bán hàng không qua cổng Role", salesGate.passes_role_gate === false, JSON.stringify(salesGate));
+
+await db.query("update public.decision_makers set role_kind = 'procurement' where id = $1", [personId]);
+const buyingGate = (await db.query("select passes_role_gate from public.contact_role_gate where channel_id = $1", [foundProfile.rows[0].id])).rows[0];
+check("cùng kênh đó, người thu mua thì qua", buyingGate.passes_role_gate === true);
+
+const noPersonGate = (await db.query("select passes_role_gate from public.contact_role_gate where channel_id = $1", [inferredChannelId])).rows[0];
+check("kênh không gắn với người nào vẫn qua (đường bộ phận)", noPersonGate.passes_role_gate === true);
+
+check(
+  "email đã phân loại thì không bao giờ bị cổng Email chặn",
+  (await db.query("select count(*)::int as n from public.contact_email_gate where channel_type = 'email' and email_kind <> 'unknown' and passes_email_gate = false")).rows[0].n === 0,
+);
+check(
+  "email chưa phân loại được thì bị giữ lại kèm lý do, không lọt ra",
+  (await db.query("select count(*)::int as n from public.contact_email_gate where channel_type = 'email' and email_kind = 'unknown' and blocked_reason = 'email_kind_unknown' and passes_email_gate = false")).rows[0].n >= 1,
+);
+
+await db.query("set role authenticated");
+await asUser(userA);
+check("thành viên đọc được cổng của workspace mình", (await db.query("select count(*)::int as n from public.contact_role_gate")).rows[0].n > 0);
+await asUser(userB);
+check("workspace khác không thấy cổng Role", (await db.query("select count(*)::int as n from public.contact_role_gate")).rows[0].n === 0);
+check("workspace khác không thấy cổng Email", (await db.query("select count(*)::int as n from public.contact_email_gate")).rows[0].n === 0);
+await asUser(userA);
+// Trả lại đúng trạng thái mà phần sau đang chờ: vai authenticated, và danh tính
+// là chủ workspace — quên bước này thì các phép kiểm phía dưới chạy nhầm người.
 
 // --- what may leave the building (export views) -------------------------------
 const rawChannelCount = (await db.query("select count(*)::int as n from public.contact_channels")).rows[0].n;

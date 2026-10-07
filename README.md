@@ -71,7 +71,7 @@ The app keeps working without `.env.local`; it stays in demo mode.
 ## Connect Supabase
 
 1. Create a Supabase project.
-2. Run every file in `supabase/migrations/` (eight, in order) in its SQL editor, or use the Supabase CLI:
+2. Run every file in `supabase/migrations/` (nine, in order) in its SQL editor, or use the Supabase CLI:
 
    ```bash
    supabase link --project-ref YOUR_PROJECT_REF
@@ -211,7 +211,8 @@ A line only becomes an item when it names one of those and either carries requir
 
 ```bash
 npm run requirements:test   # 24 checks: no fabrication, verbatim evidence, sources, PDF, no advice
-npm run persist:test      # 63 checks: rows built from real findings, written into a real Postgres, read back through the app's views, verified, exported, WhatsApp-checked
+npm run persist:test      # 71 checks: rows built from real findings, written into a real Postgres, read back through the app's views, gated, verified, exported, WhatsApp-checked
+npm run roles:test        # 33 checks: title classification order (a procurement director is not management), other ≠ unknown
 ```
 
 ### Connector: public sources to sourced channels
@@ -271,6 +272,14 @@ Re-running the same domain refreshes `last_seen_at` instead of duplicating chann
 ### Phone numbers and WhatsApp
 
 Phone numbers are normalised to **E.164** in `src/lib/connector/phone.ts`, in a second field: `value` keeps the number exactly as published, `phone_e164` holds the normalised one. A number that already carries `+` (or is written the `00` way) always normalises. A national-format number normalises **only when the company's country is known** — the country's dialling code is prepended and the trunk prefix dropped according to that country's convention (`0` for most, none for the US/Canada/Italy/Spain, `8` for Russia). Without a known country the number is left as published and `phone_e164` stays empty: an E.164 value is what opens `wa.me/<number>`, and a wrong country code does not just look wrong, it opens a chat with a stranger.
+
+### Role and email gates
+
+`role_kind` (migration 009) is classified once, when a person is written, by `src/lib/roles.ts` — instead of every caller re-deriving it from the title string. Buying roles (`procurement`, `purchasing`, `sourcing`, `supply_chain`) pass the role gate; `quality`, `logistics`, `sales`, `management` do not; `other` (a title nobody recognises) and `unknown` (no title found) are deliberately separate values, because "data we cannot use" and "no data" are different answers.
+
+`email_kind` carries the three labels from the standard design — `published_named`, `published_role_mailbox`, `inferred_unverified` — but it is a **new column beside** `identity_match`, not a rename of it: `identity_match` says *whose address this is*, `email_kind` says *how it was published*. A SQL function (`email_kind_for`) maps between them and a constraint refuses any row where the two disagree. Only `inferred_unverified` is blocked by the email gate; a published department mailbox is published, not guessed.
+
+`contact_role_gate` and `contact_email_gate` are separate from `contact_export_policy` on purpose: exporting is about what may leave the building, the gates are about who is worth calling — and that decision belongs to the user.
 
 `has_whatsapp` is a **three-state** boolean because "not checked" is not "checked, and no": `null` on everything the connector writes, `true` only after a service checked it, `false` only when a service said no. A `true` must name the service and must have an E.164 number — enforced by constraints in migration 008. `public.contact_whatsapp_links` exposes the `wa.me` link for checked numbers, and the buyer list shows a "Nhắn WhatsApp" button for exactly those rows; unchecked numbers show nothing. See `docs/backlog.md` for what is still missing (the checking service) and `docs/buyer-discovery-spec.md` §19 for the rules.
 
