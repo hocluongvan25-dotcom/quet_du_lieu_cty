@@ -33,6 +33,31 @@ Nút `wa.me` **đã có** ở danh sách buyer, nhưng nó chỉ hiện khi `has
 
 **Khuyến nghị:** thử **A** trước bằng tài khoản Cloud API thật (nếu chạy, đây là đường sạch nhất và rẻ nhất: kiểm được trước khi gửi, không rủi ro khoá). Nếu A không chạy, dùng **B** nhưng chỉ như một bước gửi thật có kiểm soát — không phải máy quét. **D bị loại trừ theo đúng nguyên tắc đã theo cả dự án: không log in, không dùng phiên không chính thức, không đặt số của khách vào tay bên thứ ba.**
 
+### Đưa API vào: cần gì, và không cần gì (07/10/2026)
+
+`npm run whatsapp:check` in ra các bước này khi chưa có thông tin đăng nhập, và **thử thật** khi có. Không cần đưa token cho ai: lệnh chạy trên máy của mình, còn phần chữ nó in ra (token đã bị che) là đủ để đọc kết quả.
+
+| Bước | Việc | Ở đâu |
+| --- | --- | --- |
+| 1 | Tạo app loại **Business**, thêm sản phẩm WhatsApp → có **số test của Meta** + token tạm (24 giờ) + **Phone Number ID** + **WABA ID** | developers.facebook.com → API Setup |
+| 2 | Nếu muốn dùng số thật: số đó phải được đăng ký vào Cloud API — qua **Coexistence** (giữ nguyên app, xem bảng dưới) hoặc chuyển hẳn (mất app, mất lịch sử trên app) | qua Tech Provider / Solution Partner của Meta |
+| 3 | Tạo token dài hạn: System user (role Admin) → Assign assets (**app** và **WABA**) → Generate token, expiry **Never**, quyền `whatsapp_business_messaging` + `whatsapp_business_management` | business.facebook.com → Settings → Users → System users |
+| 4 | Điền `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN` (và `WHATSAPP_API_VERSION` nếu cần) vào `.env.local` — file đã được gitignore | máy chạy connector |
+| 5 | `npm run whatsapp:check -- +84912345678` — lệnh **không gửi tin nhắn nào**, chỉ hỏi, và không ghi gì vào database | máy chạy connector |
+
+**Coexistence — cùng một số vừa chạy app vừa chạy API** (Meta mở từ 06/05/2025):
+
+| | Coexistence | Chuyển hẳn sang API |
+| --- | --- | --- |
+| Số | Giữ nguyên, không đổi | Giữ nguyên |
+| WhatsApp Business app | **Vẫn dùng bình thường** (1:1, nhóm, gọi) | Không dùng được số đó nữa |
+| Lịch sử chat | Sync tối đa **6 tháng** chat 1:1 sang phía API; nhóm **không** sync | Ở lại app, API bắt đầu từ trống |
+| Ràng buộc phải nhớ | App ≥ 2.24.17; **phải mở app ít nhất mỗi 13 ngày**; **không được gỡ app**; trần **20 tin/giây** | Không |
+| Bật bằng cách nào | Qua Tech Provider / Solution Partner — **không tự bật trong app** | Đăng ký số trong app Meta |
+| Vài thứ bị tắt trong lúc chạy chung | Tin tự hủy, xem một lần, vị trí trực tiếp | Không |
+
+Với việc của mình (kiểm trước khi mở nút chat), Coexistence là đường đúng: số thật vẫn thuộc về anh, app vẫn dùng như cũ, mà API có mặt để hỏi.
+
 Khi cắm (theo A hoặc B), việc phải làm là một bước ghi:
 
 ```sql

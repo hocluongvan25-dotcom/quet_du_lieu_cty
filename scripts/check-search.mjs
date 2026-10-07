@@ -14,14 +14,7 @@
  * Có khoá nhưng lỗi (401/403/429, mạng, khoá sai nhà cung cấp): thoát 1.
  */
 
-import { readFileSync, rmSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
-
-const root = process.cwd();
-const workDir = path.join(root, ".search-check");
+import { cleanupTsModules, loadEnvFile, loadTsModule } from "./lib/ts-module.mjs";
 
 const OK = "✓";
 const FAIL = "✗";
@@ -38,49 +31,8 @@ const PROVIDERS = {
   brave: { label: "Brave Search API", hint: "https://brave.com/search/api — 5 USD credit/tháng (~1.000 câu)" },
 };
 
-function loadEnvFile(file) {
-  const env = {};
-  let text = "";
-  try {
-    text = readFileSync(file, "utf8");
-  } catch {
-    return env;
-  }
-  for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    let value = trimmed.slice(eq + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    env[key] = value;
-  }
-  return env;
-}
-
-async function loadSearchApi() {
-  await mkdir(workDir, { recursive: true });
-  const entryPath = path.join(workDir, "entry.ts");
-  const bundlePath = path.join(workDir, "bundle.mjs");
-  await writeFile(entryPath, 'export { buildSearchRequest, parseSearchHits, resolveProvider } from "@/lib/connector/secondary";\n', "utf8");
-
-  const build = spawnSync(
-    "npx",
-    ["--no-install", "esbuild", entryPath, "--bundle", "--platform=node", "--format=esm", "--alias:@=./src", `--outfile=${bundlePath}`, "--log-level=warning"],
-    { cwd: root, encoding: "utf8" },
-  );
-  if (build.status !== 0) {
-    console.error(build.stderr || build.stdout);
-    process.exit(1);
-  }
-  return import(pathToFileURL(bundlePath).href);
-}
-
 async function main() {
-  const fileEnv = loadEnvFile(path.join(root, ".env.local"));
+  const fileEnv = loadEnvFile();
   const env = { ...fileEnv, ...process.env };
   const apiKey = (env.SEARCH_API_KEY ?? "").trim();
   const provider = ((env.SEARCH_PROVIDER ?? "").trim() || "serper").toLowerCase();
@@ -106,7 +58,7 @@ async function main() {
     process.exit(0);
   }
 
-  const api = await loadSearchApi();
+  const api = await loadTsModule('export { buildSearchRequest, parseSearchHits, resolveProvider } from "@/lib/connector/secondary";', { tag: "search" });
   const resolved = api.resolveProvider(apiKey, provider);
   console.log(`  ${INFO} Nhà cung cấp: ${PROVIDERS[provider].label} (SEARCH_PROVIDER=${resolved})`);
   console.log(`  ${INFO} Thử: site:${PROBE_DOMAIN} "${PROBE_QUERY}" — tên miền công khai, không phải của khách hàng.`);
@@ -150,11 +102,11 @@ async function main() {
 
   console.log(`\n  ${OK} Bước 3 sẵn sàng. Nó chỉ chạy khi bước 2 chưa tới được cửa mua hàng của công ty.`);
   console.log(`  ${INFO} Trên Supabase: thêm SEARCH_API_KEY + SEARCH_PROVIDER vào Project Settings → Edge/Environment.`);
-  rmSync(workDir, { recursive: true, force: true });
 }
 
-main().catch((error) => {
-  rmSync(workDir, { recursive: true, force: true });
-  console.error(error);
-  process.exit(1);
-});
+main()
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(() => cleanupTsModules());

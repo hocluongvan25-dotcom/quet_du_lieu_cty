@@ -100,9 +100,10 @@ import { buildBuyerWriteBatch } from "@/lib/connector/persist";
 import { toE164, whatsappLink, isE164, resolveCountry } from "@/lib/connector/phone";
 import { readSitemap } from "@/lib/connector/sitemap";
 import { coverageOf, secondaryReason } from "@/lib/connector/gate";
-import { searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry, buildSearchRequest, parseSearchHits, resolveProvider } from "@/lib/connector/secondary";
+import { searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry } from "@/lib/connector/secondary";
+import { buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck } from "@/lib/connector/whatsapp";
 
-export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry };
+export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, lookupCompaniesHouse, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, lookupSecEdgar, lookupRegistry, registriesForCountry };
 `;
   await mkdir(workDir, { recursive: true });
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
@@ -517,6 +518,66 @@ async function runChecks(api, files) {
   );
   check("payload rỗng không làm gãy", api.parseSearchHits(undefined, "serper", "acmespices.co.uk").length === 0);
   check("không nêu nhà cung cấp thì mặc định serper", api.resolveProvider("k", undefined) === "serper" && api.resolveProvider(undefined, "brave") === null);
+
+
+  section("kiểm số có WhatsApp: hai câu hỏi, không gửi tin nhắn nào");
+  const accountRequest = api.buildWhatsappAccountRequest("123456789", "tok-account");
+  check(
+    "đọc tài khoản: GET, token ở header, không nằm trong URL",
+    accountRequest.init.method === undefined &&
+      accountRequest.url.includes("/123456789?fields=") &&
+      accountRequest.init.headers.authorization === "Bearer tok-account" &&
+      !accountRequest.url.includes("tok-account"),
+  );
+  const waCheck = api.buildWhatsappCheckRequest("123456789", "tok-check", ["+84912345678", "+447700900123"]);
+  check(
+    "kiểm số: POST /contacts với force_check, token ở header",
+    waCheck.init.method === "POST" &&
+      waCheck.url.endsWith("/v26.0/123456789/contacts") &&
+      !waCheck.url.includes("tok-check") &&
+      waCheck.init.headers.authorization === "Bearer tok-check",
+  );
+  const waBody = JSON.parse(String(waCheck.init.body));
+  check(
+    "thân request nói rõ đang chờ kết quả, và đúng những số đã đưa vào",
+    waBody.force_check === true && waBody.blocking === "wait" && waBody.contacts.length === 2 && waBody.contacts[0] === "+84912345678",
+  );
+  check("đổi bản Graph API được, mặc định v26.0", api.buildWhatsappCheckRequest("1", "t", ["+84912345678"], "v21.0").url.includes("/v21.0/1/contacts") && waCheck.url.includes("/v26.0/"));
+  let refusedDomestic = "";
+  try {
+    api.buildWhatsappCheckRequest("1", "t", ["0912345678"]);
+  } catch (error) {
+    refusedDomestic = String(error instanceof Error ? error.message : error);
+  }
+  check("số nội địa bị từ chối — không tự thêm mã quốc gia", refusedDomestic.includes("E.164"), refusedDomestic);
+  let refusedEmpty = "";
+  try {
+    api.buildWhatsappCheckRequest("1", "t", []);
+  } catch (error) {
+    refusedEmpty = String(error instanceof Error ? error.message : error);
+  }
+  let refusedNoCreds = "";
+  try {
+    api.buildWhatsappCheckRequest("", "t", ["+84912345678"]);
+  } catch (error) {
+    refusedNoCreds = String(error instanceof Error ? error.message : error);
+  }
+  check("thiếu số hoặc thiếu thông tin đăng nhập thì dừng trước khi gọi mạng", refusedEmpty.includes("không có số") && refusedNoCreds.includes("Phone Number ID"));
+
+  const parsed = api.parseWhatsappCheck({
+    contacts: [
+      { input: "+84912345678", status: "valid", wa_id: "84912345678" },
+      { input: "+447700900123", status: "invalid" },
+      { input: "+12025550123", status: "processing" },
+      { input: "+34600111222", wa_id: 34600111222 },
+    ],
+  });
+  check("valid có wa_id, invalid không có", parsed[0].verdict === "valid" && parsed[0].waId === "84912345678" && parsed[1].verdict === "invalid" && parsed[1].waId === null);
+  check("trạng thái lạ và thiếu trạng thái đều là unknown — không suy thành false", parsed[2].verdict === "unknown" && parsed[3].verdict === "unknown" && parsed[3].waId === null);
+  check("wa_id dạng số vẫn đọc thành chuỗi", parsed[3].input === "+34600111222");
+  check("không có danh sách contacts thì trả rỗng, không bịa kết luận", api.parseWhatsappCheck({}).length === 0 && api.parseWhatsappCheck(undefined).length === 0 && api.parseWhatsappCheck({ contacts: "không phải mảng" }).length === 0);
+  check("câu mô tả nói thẳng unknown không phải là \"không có\"", api.describeWhatsappCheck({ input: "+84912345678", verdict: "unknown", waId: null }).includes("không phải"));
+  check("đọc tài khoản: có số và tên thì trả về, rỗng thì null", api.parseWhatsappAccount({ display_phone_number: "+84 123", verified_name: "Acme" })?.verifiedName === "Acme" && api.parseWhatsappAccount({}) === null && api.parseWhatsappAccount(null) === null);
 
   section("sổ đăng ký doanh nghiệp");
   check("chọn sổ theo quốc gia", api.registriesForCountry("UK")[0] === "companies_house" && api.registriesForCountry("United States")[0] === "sec_edgar");

@@ -96,6 +96,7 @@ Runs every file in `supabase/migrations` against an in-process Postgres (PGlite,
 ```bash
 npm run supabase:check   # auth, tables, bucket — and whether the project is reachable
 npm run search:check     # the search provider key, using the connector's own request
+npm run whatsapp:check   # whether a number has WhatsApp, via your own Cloud API (sends nothing)
 ```
 
 The check reads `.env.local` and reports whether the URL and anon key belong to the same project, whether Auth is reachable and which providers are enabled, whether every table from the migration exists, and whether the private `research-artifacts` bucket is present. It exits non-zero when a check fails, so it can gate a deploy or a CI job.
@@ -268,7 +269,7 @@ npm run connector:run acmespices.co.uk -- --no-secondary   # company site only
 | `persist.ts` | Builds the database rows (pure) and writes them through a small store port: `buyer_profiles`, `decision_makers`, `contact_channels`, `buyer_routes` |
 
 ```bash
-npm run connector:test    # 192 checks on real HTML and PDF fixtures, no network needed
+npm run connector:test    # 204 checks on real HTML and PDF fixtures, no network needed
 npm run connector:run mariani.com            # real run, human readable
 npm run connector:run mariani.com -- --json  # full JSON
 ```
@@ -344,7 +345,7 @@ Every re-read is appended to `contact_reverifications` with the page, the quote 
 
 `contact_role_gate` and `contact_email_gate` are separate from `contact_export_policy` on purpose: exporting is about what may leave the building, the gates are about who is worth calling — and that decision belongs to the user.
 
-`has_whatsapp` is a **three-state** boolean because "not checked" is not "checked, and no": `null` on everything the connector writes, `true` only after a service checked it, `false` only when a service said no. A `true` must name the service and must have an E.164 number — enforced by constraints in migration 008. `public.contact_whatsapp_links` exposes the `wa.me` link for checked numbers, and the buyer list shows a "Nhắn WhatsApp" button for exactly those rows; unchecked numbers show nothing. See `docs/backlog.md` for what is still missing (the checking service) and `docs/buyer-discovery-spec.md` §19 for the rules.
+`has_whatsapp` is a **three-state** boolean because "not checked" is not "checked, and no": `null` on everything the connector writes, `true` only after a service checked it, `false` only when a service said no. A `true` must name the service and must have an E.164 number — enforced by constraints in migration 008. `public.contact_whatsapp_links` exposes the `wa.me` link for checked numbers, and the buyer list shows a "Nhắn WhatsApp" button for exactly those rows; unchecked numbers show nothing. `npm run whatsapp:check` is the way in: it sends **no message**, asks Meta which number the account is on, then asks whether the numbers you pass have WhatsApp — and with no credentials it prints the setup steps instead. See `docs/backlog.md` for the four routes (and why an unofficial gateway was rejected) and `docs/buyer-discovery-spec.md` §19 for the rules, including coexistence if the number still runs the Business app.
 
 ### Retention and the artifact bucket
 

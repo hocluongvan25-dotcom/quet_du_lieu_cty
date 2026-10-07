@@ -9,6 +9,7 @@
     "lint": "eslint",
     "supabase:check": "node scripts/check-supabase.mjs",
     "search:check": "node scripts/check-search.mjs",
+    "whatsapp:check": "node scripts/check-whatsapp.mjs",
     "check:content": "node scripts/check-content.mjs",
     "connector:test": "node scripts/test-connector.mjs",
     "export:test": "node scripts/test-export.mjs",

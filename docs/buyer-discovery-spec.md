@@ -594,13 +594,21 @@ Ghi chú đã bỏ đi một điều sai từng được lặp lại: **On-Premi
 
 **Điều đáng nói nhất về chi phí:** Meta chỉ tính tiền tin **gửi được**, nên một tin tới số không tồn tại không bị Meta tính (Twilio vẫn thu 0,001 USD/tin lỗi) — "gửi thật rồi đọc trạng thái" vì thế rẻ hơn vẻ ngoài của nó. Nhưng nó vẫn là một tin nhắn thật tới một người thật, kèm nghĩa vụ opt-in.
 
+### Nếu số đang chạy WhatsApp Business app: Coexistence (07/10/2026)
+
+Một số muốn vừa giữ app vừa cắm Cloud API thì Meta có **Coexistence** (mở từ 06/05/2025): app ≥ 2.24.17, bật qua Tech Provider / Solution Partner (không tự bật trong app), sync tối đa **6 tháng** chat 1:1 (nhóm không sync), phải mở app ít nhất **mỗi 13 ngày** và **không được gỡ app**, trần **20 tin/giây**, một vài tính năng bị tắt trong lúc chạy chung. Đường còn lại — chuyển hẳn số sang API — thì số đó không dùng được trên app nữa và lịch sử ở lại app.
+
+**Thông tin đăng nhập cần đúng ba thứ**, đều lấy từ tài khoản của mình: `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN` (token của **System user**, expiry *Never*, quyền `whatsapp_business_messaging` + `whatsapp_business_management`; token ở API Setup chỉ sống 24 giờ nên không dùng cho việc này), và tuỳ chọn `WHATSAPP_API_VERSION` (mặc định `v26.0` — bản v20.0 đã hết hạn 24/09/2026).
+
+`npm run whatsapp:check` là đường kiểm: **không gửi tin nhắn nào**, chỉ hỏi tài khoản đang gọi là số nào rồi hỏi Meta các số được đưa vào. Kết quả đọc theo đúng ba trạng thái của `has_whatsapp`. Chưa có thông tin đăng nhập thì lệnh in ra các bước lấy rồi thoát 0 — thiếu phần này là trạng thái bình thường.
+
 ### Nút WhatsApp trên UI
 
 `public.contact_whatsapp_links` (008) chỉ trả những số **đã kiểm là có WhatsApp**, kèm `whatsapp_url = 'https://wa.me/' || <số không dấu +>`. Danh sách buyer đọc view này và hiện nút "Nhắn WhatsApp"; số chưa kiểm thì không có nút, không có suy đoán. View rỗng khi chưa cắm dịch vụ kiểm — và đó là trạng thái đúng.
 
 ### Kiểm chứng
 
-- `npm run connector:test` — 192 check ở vòng 012 (120 ở vòng này), thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
+- `npm run connector:test` — 204 check ở vòng 012 (120 ở vòng này), thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
 - `npm run persist:test` — 63 check: E.164 được lưu đúng, `has_whatsapp` là `null` sau khi connector ghi, view WhatsApp trống khi chưa kiểm, rồi mô phỏng kết quả kiểm → view trả `https://wa.me/17074522800`, và hai ràng buộc mới bị database từ chối thi hành.
 
 ---
@@ -768,7 +776,7 @@ Với `SEARCH_API_KEY` / `SEARCH_PROVIDER` / `COMPANIES_HOUSE_API_KEY` đặt tr
 
 ### Kiểm chứng
 
-`npm run connector:test` — **192 check** ở vòng 012 (182 ở vòng này, 120 trước đó): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá, hình dạng request/kết quả của cả ba nhà cung cấp, kết quả hỏng bị bỏ), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
+`npm run connector:test` — **204 check** ở vòng 012 (182 ở vòng này, 120 trước đó): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá, hình dạng request/kết quả của cả ba nhà cung cấp, kết quả hỏng bị bỏ), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
 
 ### Kèm theo: `info@` không còn bị xếp là email bộ phận
 
