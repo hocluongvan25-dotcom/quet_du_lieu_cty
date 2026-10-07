@@ -11,25 +11,8 @@
  * thêm một dòng vào sổ, và kênh vừa được làm mới thì không còn trong hàng đợi.
  */
 
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-
-function loadEnvFile(path) {
-  try {
-    return Object.fromEntries(
-      readFileSync(path, "utf8")
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith("#") && line.includes("="))
-        .map((line) => {
-          const separator = line.indexOf("=");
-          return [line.slice(0, separator).trim(), line.slice(separator + 1).trim().replace(/^["']|["']$/g, "")];
-        }),
-    );
-  } catch {
-    return {};
-  }
-}
+import { loadEnvFile } from "./lib/ts-module.mjs";
 
 const fileEnv = loadEnvFile(resolve(process.cwd(), ".env.local"));
 const secret = process.env.CRON_SECRET ?? fileEnv.CRON_SECRET ?? "";

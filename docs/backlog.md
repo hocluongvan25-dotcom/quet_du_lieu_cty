@@ -35,6 +35,8 @@ Nút `wa.me` **đã có** ở danh sách buyer, nhưng nó chỉ hiện khi `has
 
 ### Đưa API vào: cần gì, và không cần gì (07/10/2026)
 
+> Trạng thái 07/10/2026: phần **search** đã có khoá thật và đã nối được (Tavily, HTTP 200, 10 kết quả). Phần **kiểm WhatsApp** vẫn chờ tài khoản Cloud API — lệnh `npm run whatsapp:check` đã sẵn sàng và in đủ các bước lấy.
+
 `npm run whatsapp:check` in ra các bước này khi chưa có thông tin đăng nhập, và **thử thật** khi có. Không cần đưa token cho ai: lệnh chạy trên máy của mình, còn phần chữ nó in ra (token đã bị che) là đủ để đọc kết quả.
 
 | Bước | Việc | Ở đâu |

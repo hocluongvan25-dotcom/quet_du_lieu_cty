@@ -751,6 +751,10 @@ Vì vậy ba nhà cung cấp ở trên là đường còn sống, và **đổi n
 
 **HTTP 200 chưa phải bằng chứng đã nối được.** Một nhà cung cấp có thể trả 200 kèm thân lỗi (sai khoá, sai endpoint), và khi đó mảng kết quả rỗng rất dễ bị đọc thành "nối được nhưng không có kết quả". `hasSearchShape` bắt đúng ca đó: không có mảng kết quả đúng hình dạng (`organic` / `results` / `web.results`) thì kết luận là **chưa nối được**, kèm thân phản hồi nguyên văn.
 
+**Đã kiểm bằng khoá thật (07/10/2026):** một khoá Tavily trong `.env.local` cho ra `HTTP 200`, đúng hình dạng `results: [...]`, 10 dòng kết quả. Trước đó lệnh kiểm in ra một chữ `undefined` — không phải lỗi khoá mà là lỗi gom module trên Windows (`spawnSync("npx", …)` không spawn được `npx.cmd`; sau khi thất bại, `build.stderr` và `build.stdout` đều `undefined`). Đã sửa bằng esbuild API chạy trong cùng tiến trình, và ghi lại vì bài học lặp lại được: **một lệnh chết trước khi gọi mạng vẫn có thể trông như đã gọi mạng.**
+
+**Luật đọc biến môi trường:** mọi lệnh (`connector:run`, `search:check`, `whatsapp:check`, `reverify:run`, `retention:run`) đọc `.env.local` trước rồi mới tới biến môi trường shell — một file, một cách đọc. `connector:run` in ra khoá được lấy từ đâu, và **cảnh báo khi bước 3 không có khoá nào**, để "chạy xanh" không bị nhầm với "đã bật nguồn cấp 2".
+
 Gói miễn phí để bắt đầu, theo công bố của chính các nhà cung cấp (09/2026): Serper ~2.500 câu thử rồi ~1 USD/1.000 câu; Tavily 1.000 credit/tháng; Brave 5 USD credit/tháng (~1.000 câu, tức về sau 5 USD/1.000 câu). **Serper rẻ nhất nhưng không phải index độc lập** — nó trả kết quả Google; Brave có index riêng. Với cùng một lớp chỉ-dùng-URL, cả ba đều đủ.
 
 

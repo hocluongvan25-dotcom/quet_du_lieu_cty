@@ -25,10 +25,20 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { bundleTs } from "./lib/ts-module.mjs";
+import { bundleTs, loadEnvFile } from "./lib/ts-module.mjs";
 
 const root = process.cwd();
 const workDir = path.join(root, ".connector-test");
+
+/**
+ * Đọc `.env.local` rồi mới tới biến môi trường của shell.
+ *
+ * Cả `search:check` và `whatsapp:check` đều đọc file này; nếu `connector:run` chỉ
+ * đọc `process.env` thì khoá đã dán vào `.env.local` sẽ **âm thầm không được
+ * dùng** — lần chạy vẫn xanh, chỉ là bước 3 bị bỏ qua, và không ai biết vì sao.
+ * Cùng một file, cùng một cách đọc, ở mọi lệnh.
+ */
+const env = { ...loadEnvFile(), ...process.env };
 
 function parseArgs(argv) {
   const args = { seed: "", json: false, maxPages: 6, maxDocuments: 3, delayMs: 400, targets: undefined, company: "", country: "", secondary: true };
@@ -77,6 +87,22 @@ export const runConnectorFn = runConnector;
 
   const { runConnectorFn } = await import(pathToFileURL(bundlePath).href);
 
+  if (!args.json) {
+    const searchFromShell = (process.env.SEARCH_API_KEY ?? "").trim();
+    const hasSearch = Boolean(searchFromShell || (env.SEARCH_API_KEY ?? "").trim());
+    const hasRegistry = Boolean((env.COMPANIES_HOUSE_API_KEY ?? "").trim());
+    if (!args.secondary) {
+      console.error("· nguồn cấp 2: đã tắt bằng --no-secondary");
+    } else if (hasSearch || hasRegistry) {
+      const parts = [];
+      if (hasSearch) parts.push(`search (khoá từ ${searchFromShell ? "biến môi trường" : ".env.local"})`);
+      if (hasRegistry) parts.push("sổ đăng ký Anh");
+      console.error(`· nguồn cấp 2: có ${parts.join(" + ")} — chỉ chạy khi bước 2 chưa tới được cửa mua hàng`);
+    } else {
+      console.error("· nguồn cấp 2: chưa có khoá nào trong .env.local (SEARCH_API_KEY / COMPANIES_HOUSE_API_KEY) — bước 3 sẽ bị bỏ qua");
+    }
+  }
+
   const result = await runConnectorFn(args.seed, {
     maxPages: args.maxPages,
     maxDocuments: args.maxDocuments,
@@ -86,9 +112,9 @@ export const runConnectorFn = runConnector;
     country: args.country,
     secondary: args.secondary
       ? {
-          searchApiKey: process.env.SEARCH_API_KEY,
-          searchProvider: process.env.SEARCH_PROVIDER,
-          companiesHouseApiKey: process.env.COMPANIES_HOUSE_API_KEY,
+          searchApiKey: env.SEARCH_API_KEY,
+          searchProvider: env.SEARCH_PROVIDER,
+          companiesHouseApiKey: env.COMPANIES_HOUSE_API_KEY,
         }
       : false,
     log: args.json ? () => {} : (message) => console.error(`· ${message}`),
