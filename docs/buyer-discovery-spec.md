@@ -586,13 +586,13 @@ Người dùng hỏi có tích hợp luôn dịch vụ kiểm không. Câu trả
 | Đường | Kiểm được trước khi gửi? | Chi phí | Rủi ro |
 | --- | --- | --- | --- |
 | **Meta WhatsApp Cloud API — endpoint `/contacts`** | Có, nếu endpoint tồn tại với tài khoản của mình | Theo tin nhắn/hội thoại của Cloud API | Không rủi ro khoá; nhưng **không có tài liệu chính thức**: URL `developers.facebook.com/docs/whatsapp/cloud-api/reference/contacts/` trả 404, còn báo cáo cộng đồng (02/2026) dùng `POST /{phone_number_id}/contacts` với `contacts` + `force_check`. Đường này **phải tự thử với tài khoản thật** trước khi tin |
-| **Gửi một template rồi đọc trạng thái** (Cloud API chính thức) | Không phải "kiểm" — gửi thật rồi đọc webhook: `sent` nghĩa là số có WhatsApp, `delivered` nghĩa là máy đã nhận; mã `131026` là nhóm "số xấu" nhưng nhiễu | Mỗi lần kiểm là **một tin nhắn thật**, trả tiền theo tin | Không rủi ro kỹ thuật, nhưng phải có cơ sở liên hệ (opt-in) và đúng loại template — không thể dùng làm máy quét hàng loạt |
-| **Twilio** | **Không.** Twilio không có API kiểm số có WhatsApp; tài liệu của họ (25/09/2026) tự chỉ người dùng mở `wa.me/<số>` bằng tay, hoặc đọc Error Logs | — | — |
+| **Gửi một template rồi đọc trạng thái** (Cloud API chính thức) | Không phải "kiểm" — gửi thật rồi đọc webhook: `sent` nghĩa là số có WhatsApp, `delivered` nghĩa là máy đã nhận; mã `131026` là nhóm "số xấu" nhưng nhiễu | Mỗi lần kiểm là **một tin nhắn thật**; Meta chỉ tính tiền tin gửi được (tin tới số không tồn tại không bị tính), nhưng Twilio thu thêm 0,001 USD/tin lỗi | Không rủi ro kỹ thuật, nhưng phải có cơ sở liên hệ (opt-in) và đúng loại template — không thể dùng làm máy quét hàng loạt |
+| **Twilio** | **Không.** Twilio không có API kiểm số có WhatsApp; tài liệu của họ tự chỉ người dùng mở `wa.me/<số>` bằng tay, hoặc đọc Error Logs | — | — |
 | **Gateway không chính thức** (Green API `checkWhatsapp`, Whapi.Cloud, các dịch vụ "bulk checker") | Có, theo lô | Green API từ ~12 USD/tháng/instance; hạn mức `checkWhatsapp` 100 lượt/tháng ở gói Developer, 30.000 ở gói Business | **Trái điều khoản của Meta.** Các gateway này chạy qua một phiên WhatsApp Web đã đăng nhập; số dùng để kiểm **có thể bị khoá**, và dịch vụ bên thứ ba đọc được danh sách số mình đưa vào |
 
 Ghi chú đã bỏ đi một điều sai từng được lặp lại: **On-Premises API từng có `/contacts` để kiểm trước, Cloud API bỏ nó** — nhưng không phải "Meta không có cách nào": vẫn còn đường gửi-thật-đọc-trạng-thái, và endpoint `/contacts` có dấu vết trở lại trên Cloud API qua báo cáo cộng đồng (chưa có tài liệu chính thức).
 
-**Điều đáng nói nhất về chi phí:** Twilio ghi rõ WhatsApp **không tính tiền cho tin nhắn gửi tới số không tồn tại** — nên "gửi thật rồi đọc trạng thái" rẻ hơn vẻ ngoài của nó, nhưng vẫn là một tin nhắn thật tới người thật, kèm nghĩa vụ opt-in.
+**Điều đáng nói nhất về chi phí:** Meta chỉ tính tiền tin **gửi được**, nên một tin tới số không tồn tại không bị Meta tính (Twilio vẫn thu 0,001 USD/tin lỗi) — "gửi thật rồi đọc trạng thái" vì thế rẻ hơn vẻ ngoài của nó. Nhưng nó vẫn là một tin nhắn thật tới một người thật, kèm nghĩa vụ opt-in.
 
 ### Nút WhatsApp trên UI
 
