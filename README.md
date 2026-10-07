@@ -71,7 +71,7 @@ The app keeps working without `.env.local`; it stays in demo mode.
 ## Connect Supabase
 
 1. Create a Supabase project.
-2. Run every file in `supabase/migrations/` (eleven, in order) in its SQL editor, or use the Supabase CLI:
+2. Run every file in `supabase/migrations/` (twelve, in order) in its SQL editor, or use the Supabase CLI:
 
    ```bash
    supabase link --project-ref YOUR_PROJECT_REF
@@ -179,6 +179,26 @@ An inferred email can be stored and shown in the app, but it only becomes export
 
 Writes come from connectors running with the service role; members only read (`insert`/`update`/`delete` are revoked from `authenticated`, and `db:verify` asserts that).
 
+### Customs records, roles and the resolve queue
+
+Bills of lading publish no email and no phone — so the customs layer carries **no contact columns at all**, and none of it lands in `contact_channels`. What it carries is the three things the paperwork actually says: which parties took part, in which role, on which shipment.
+
+Three layers, kept apart on purpose (migration 012):
+
+1. **As printed** — `customs_records` + `customs_record_parties` keep the name exactly as the bill prints it (`name_as_printed`), next to the normalised copy used only for matching (`name_normalized`), plus the country as printed with a separate `country_iso2`, and the column the value was read from (`source_column`).
+2. **Derived** — `public.customs_side_for(role)` turns the printed role into a side of the trade: `importer`/`consignee` → `importer_side`, `shipper` → `exporter_side`, and *everything else stays `unknown`*. A notify party can be a bank, a forwarder or a customs broker, so deriving a buyer from it would be a guess. `src/lib/customs/normalize.ts` is the TypeScript twin of that function, and both sides are asserted against the same table in `customs:test` and `db:verify`.
+3. **Decided** — `customs_entity_matches` records what a person concluded: `linked`, `created`, `review` (candidates exist, nobody has chosen) or `unmatched` (there is nothing to choose). A CHECK constraint refuses any row that would turn a shipper into a customer, whether it arrives through the function or through a direct insert.
+
+Writing is four service-role-only functions: `record_customs_record` (idempotent — the same bill number returns the existing row with `replayed = true`, never a duplicate), `link_customs_party` (refuses anything that is not importer-side, refuses a profile from another workspace, and writes the shipment into `trade_signals` so "linked" always comes with "has history"), `mark_customs_party` (review/unmatched only — the two states stay different), and `create_buyer_from_customs_party` (needs a country, reuses a single same-name profile, and hands over to `review` when two profiles share the name).
+
+**No source, no record**: like every other write path, the source key must exist in `market_sources` (the 005 rule), so importing a customs file starts by registering the source.
+
+On the reading side, `buyer_customs_summary` gives the report its import history (shipment count, first/last shipment, HS codes grouped at HS6, goods samples, supplier names and countries, sources, how the link was decided) and `buyer_customs_roles` keeps every role the buyer appears in — including `notify_party`, which is shown as `unknown` side rather than quietly dropped. `customs_resolution_queue` is the working queue: importer-side parties that are not linked yet, with the counterparty on the same bill for context.
+
+The screen: the buyer report and the expanded row on `/[locale]/buyers` both show a **"Lịch sử nhập khẩu"** block (roles as chips, shipment window, HS6 codes, goods, suppliers) and the top of the buyers page carries the **"Hàng đợi phân loại tờ khai hải quan"** panel. Candidates are ranked by evidence, never auto-applied: a matching declared domain scores highest, then the same name with the same country, then the same name alone, then a close name — each with the reason spelled out, and a name clash on country or domain is stated as a reason *against* linking. Deciding happens through `POST /api/customs`, which reads the party through the caller's own session first (so another workspace's party is invisible), then writes with the service role.
+
+Importing a file is a deliberate, reported step: `src/lib/customs/import.ts` maps columns by name (`Shipper Name` → the shipper's name; `Buyer` → the importer, keeping the file's word in `source_column`), prints which columns it understood and which it ignored, refuses a file with no bill-number column or no role column at all, drops an ambiguous `05/03/2026` date instead of guessing the day/month order, and reports what it skipped and why.
+
 ### Buyer list and CSV export
 
 `/[locale]/buyers` is the list-first view: one row per company with its exportable channel count, named people, and last-seen date. Expanding a row shows each channel with its person, role, `identity_match`, confidence label and source link.
@@ -186,7 +206,7 @@ Writes come from connectors running with the service role; members only read (`i
 `GET /api/export/buyers` returns the CSV the screen's export button downloads. It reads `outreach_ready_contacts`, which already applies the policy, so withheld rows (mailbox unchecked, catch-all, expired) are absent by construction rather than by a filter in the handler. Columns are data only — no ranking, score, priority or advice column — and a test asserts that. BOM UTF-8 and CRLF so Excel opens Vietnamese text correctly; the screen's filters are passed through, and the count of withheld rows is shown on the page so an export is never quietly short.
 
 ```bash
-npm run export:test   # 43 checks, including re-reading the CSV with an RFC 4180 parser
+npm run export:test   # 58 checks, including re-reading the CSV with an RFC 4180 parser
 npm run report:test   # 19 checks: person channels merge onto the person card, nothing lost or invented
 npm run requirements:test # 24 checks: supplier requirements kept verbatim, sourced, never invented
 ```
@@ -211,8 +231,9 @@ A line only becomes an item when it names one of those and either carries requir
 
 ```bash
 npm run requirements:test   # 24 checks: no fabrication, verbatim evidence, sources, PDF, no advice
-npm run persist:test      # 71 checks: rows built from real findings, written into a real Postgres, read back through the app's views, gated, verified, exported, WhatsApp-checked
+npm run persist:test      # 144 checks: rows built from real findings, written into a real Postgres, read back through the app's views, gated, verified, exported, WhatsApp-checked, and customs records linked end to end
 npm run roles:test        # 33 checks: title classification order (a procurement director is not management), other ≠ unknown
+npm run customs:test      # 105 checks: reading a customs CSV, mapping columns to fields, refusing to guess, ranking candidates
 npm run reverify:test     # 37 checks: three answers to "is this value still there", and what each one changes
 ```
 
@@ -412,5 +433,6 @@ supabase/migrations/008_whatsapp_and_e164.sql
 supabase/migrations/009_role_and_email_gates.sql
 supabase/migrations/010_reverification.sql
 supabase/migrations/011_registry_identity.sql
+supabase/migrations/012_customs_parties.sql
 docs/buyer-discovery-spec.md
 ```

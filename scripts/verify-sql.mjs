@@ -798,6 +798,248 @@ check("workspace khác không thấy view đối chiếu", (await db.query("sele
 await asUser(userA);
 
 
+section("dữ liệu hải quan (012)");
+
+// Hàm ghi của 012 chỉ cấp cho service_role — đúng như production, nơi tầng ghi
+// chạy bằng service role. Bỏ vai `authenticated` để gọi, rồi trả lại ở cuối.
+await db.query("reset role");
+
+// Tham số phải có kiểu tường minh: hàm có tham số mặc định nên Postgres không
+// suy kiểu hộ khi thiếu đối số (giống PostgREST, nơi tầng ứng dụng gọi theo tên).
+const RECORD_SQL =
+  "select * from public.record_customs_record($1::uuid, $2::text, $3::text, $4::date, $5::text, $6::text, $7::numeric, $8::text, $9::numeric, $10::integer, $11::numeric, $12::text, $13::text, $14::jsonb)";
+const LINK_SQL =
+  "select * from public.link_customs_party($1::uuid, $2::uuid, $3::public.customs_match_method, $4::smallint, $5::text[], $6::text)";
+const MARK_SQL =
+  "select * from public.mark_customs_party($1::uuid, $2::public.customs_match_status, $3::public.customs_match_method, $4::smallint, $5::text[], $6::text)";
+const CREATE_SQL = "select * from public.create_buyer_from_customs_party($1::uuid, $2::text)";
+
+async function recordCustoms(reference, shipmentDate, payload, details = {}) {
+  return (
+    await db.query(RECORD_SQL, [
+      orgId,
+      "customs_bol",
+      reference,
+      shipmentDate,
+      details.hsCode ?? null,
+      details.product ?? null,
+      details.quantity ?? null,
+      details.unit ?? null,
+      details.weightKg ?? null,
+      details.containers ?? null,
+      details.valueUsd ?? null,
+      details.originCountry ?? null,
+      details.destinationPort ?? null,
+      JSON.stringify(payload),
+    ])
+  ).rows[0];
+}
+
+async function linkCustoms(partyId, buyerId_, method, confidence, reasons = [], decidedBy = "resolver") {
+  return (await db.query(LINK_SQL, [partyId, buyerId_, method, confidence, reasons, decidedBy])).rows[0];
+}
+
+async function markCustoms(partyId, status, method, confidence, reasons = [], decidedBy = "resolver") {
+  return (await db.query(MARK_SQL, [partyId, status, method, confidence, reasons, decidedBy])).rows[0];
+}
+
+check(
+  "vận đơn không mang theo cột liên hệ nào",
+  (
+    await db.query(
+      "select count(*)::int as n from information_schema.columns where table_schema = 'public' and table_name in ('customs_records','customs_record_parties','customs_entity_matches') and column_name in ('email','phone','phone_e164','value','contact')",
+    )
+  ).rows[0].n === 0,
+);
+
+// Bảng vai → bên phải khớp bản TypeScript trong src/lib/customs/normalize.ts
+// (bảng tương ứng được kiểm ở npm run customs:test).
+const sideTable = { importer: "importer_side", consignee: "importer_side", shipper: "exporter_side", notify_party: "unknown", other: "unknown" };
+for (const [role, side] of Object.entries(sideTable)) {
+  check(`customs_side_for(${role}) = ${side}`, (await db.query("select public.customs_side_for($1::public.customs_party_role) as side", [role])).rows[0].side === side);
+}
+
+// Nguồn phải có dòng trong market_sources trước (luật của 005 do 012 giữ).
+await db.query(
+  `insert into public.market_sources (key, display_name, kind, licence_type, notes)
+   values ('customs_bol', 'Hải quan — vận đơn công bố', 'trade_data', 'public_record', 'nguồn cho bộ kiểm')
+   on conflict (key) do nothing`,
+);
+
+const customsRecord = await recordCustoms(
+  "BL-90001",
+  "2026-04-02",
+  [
+    { role: "consignee", name: "GREAT LAKES PACKAGING LLC", name_normalized: "great lakes packaging", country: "United States", country_iso: "US", address: "1200 Erie St, Cleveland", column: "Consignee Name" },
+    { role: "shipper", name: "VIET LONG EXPORT JSC", name_normalized: "viet long export", country: "Viet Nam", country_iso: "VN", column: "Shipper Name" },
+    { role: "notify_party", name: "LAKE ERIE LOGISTICS CO", name_normalized: "lake erie logistics", country: "United States", country_iso: "US", column: "Notify Party" },
+    { role: "consignee", name: "   ", name_normalized: "   ", country: "United States" },
+    { role: "khong_phai_vai", name: "Rác", name_normalized: "rac" },
+  ],
+  { hsCode: "0801.32.00", product: "Cashew nuts, shelled", quantity: 1200, unit: "CARTONS", weightKg: 18240.5, containers: 2, valueUsd: 54000, originCountry: "Viet Nam", destinationPort: "Oakland" },
+);
+check("ghi được một tờ khai", Boolean(customsRecord?.record_id), JSON.stringify(customsRecord));
+check("lần ghi đầu có replayed = false", customsRecord?.replayed === false);
+check("organization_id nhận từ tham số, không suy từ buyer", (await db.query("select organization_id, record_reference from public.customs_records where id = $1", [customsRecord.record_id])).rows[0].organization_id === orgId);
+const storedRecord = (await db.query("select record_reference, hs_code, shipment_date, containers, value_usd, origin_country, destination_port from public.customs_records where id = $1", [customsRecord.record_id])).rows[0];
+check("khoá và mã HS giữ nguyên bản in", storedRecord?.record_reference === "BL-90001" && storedRecord?.hs_code === "0801.32.00", JSON.stringify(storedRecord));
+check("số liệu của lô hàng được ghi đúng kiểu", storedRecord?.containers === 2 && Number(storedRecord?.value_usd) === 54000 && storedRecord?.origin_country === "Viet Nam" && storedRecord?.destination_port === "Oakland", JSON.stringify(storedRecord));
+
+const customsParties = (await db.query("select id, role, side, name_as_printed, name_normalized, country_as_printed, country_iso2, address_as_printed from public.customs_record_parties where customs_record_id = $1 order by role", [customsRecord.record_id])).rows;
+check("ba bên hợp lệ được ghi, bên thiếu tên và vai lạ bị bỏ", customsParties.length === 3, JSON.stringify(customsParties.map((row) => row.role)));
+check("bên được suy sang bên giao dịch bằng trigger", customsParties.find((row) => row.role === "consignee")?.side === "importer_side" && customsParties.find((row) => row.role === "shipper")?.side === "exporter_side");
+check("bên được thông báo cố ý để unknown, không suy thành bên mua", customsParties.find((row) => row.role === "notify_party")?.side === "unknown");
+check("tên giữ nguyên bản in, bản chuẩn hoá chỉ để tra", customsParties.find((row) => row.role === "consignee")?.name_as_printed === "GREAT LAKES PACKAGING LLC" && customsParties.find((row) => row.role === "consignee")?.name_normalized === "great lakes packaging");
+check("quốc gia giữ bản in và mã ISO nằm ở cột riêng", (() => {
+  const shipper = customsParties.find((row) => row.role === "shipper");
+  return shipper?.country_as_printed === "Viet Nam" && shipper?.country_iso2 === "VN";
+})());
+check("địa chỉ của bên được giữ nguyên", customsParties.find((row) => row.role === "consignee")?.address_as_printed === "1200 Erie St, Cleveland");
+
+const replayRecord = await recordCustoms("BL-90001", "2026-04-02", []);
+check("nhập lại cùng số vận đơn: trả về dòng cũ", replayRecord?.record_id === customsRecord.record_id && replayRecord?.replayed === true, JSON.stringify(replayRecord));
+check("nhập lại không nhân đôi bên", (await db.query("select count(*)::int as n from public.customs_record_parties where customs_record_id = $1", [customsRecord.record_id])).rows[0].n === 3);
+
+const noReference = await expectFailure(RECORD_SQL, [orgId, "customs_bol", "   ", null, null, null, null, null, null, null, null, null, null, "[]"], "Thiếu số vận đơn");
+check("thiếu số vận đơn thì từ chối", noReference.ok, noReference.message);
+const unknownSource = await expectFailure(RECORD_SQL, [orgId, "nguon_khong_co", "BL-90002", null, null, null, null, null, null, null, null, null, null, "[]"], "market_sources");
+check("nguồn chưa đăng ký thì từ chối", unknownSource.ok, unknownSource.message);
+const badParties = await expectFailure(RECORD_SQL, [orgId, "customs_bol", "BL-90003", null, null, null, null, null, null, null, null, null, null, '{"a":1}'], "mảng JSON");
+check("danh sách bên không phải mảng thì từ chối", badParties.ok, badParties.message);
+check("bị từ chối thì không có tờ khai nào được ghi thêm", (await db.query("select count(*)::int as n from public.customs_records")).rows[0].n === 1);
+
+const consigneeParty = customsParties.find((row) => row.role === "consignee").id;
+const shipperParty = customsParties.find((row) => row.role === "shipper").id;
+
+const linkShipper = await expectFailure(LINK_SQL, [shipperParty, buyerId, "manual", 50, [], "resolver"], "chỉ bên nhận hàng");
+check("bên gửi hàng không bao giờ được nối thành khách hàng", linkShipper.ok, linkShipper.message);
+
+const otherOrgBuyer = (
+  await db.query(
+    `insert into public.buyer_profiles (organization_id, legal_name, display_name, country, domain)
+     values ($1, 'Other Tenant Ltd', 'Other Tenant', 'Canada', 'other-tenant.example') returning id`,
+    [orgB],
+  )
+).rows[0].id;
+const crossOrg = await expectFailure(LINK_SQL, [consigneeParty, otherOrgBuyer, "manual", 50, [], "resolver"], "workspace khác");
+check("không nối được sang hồ sơ của workspace khác", crossOrg.ok, crossOrg.message);
+
+const linkedParty = await linkCustoms(consigneeParty, buyerId, "exact_name_country", 88, ["tên trùng khít", "cùng quốc gia"], "owner@example.com");
+check("nối được bên nhận hàng với hồ sơ khách hàng", linkedParty?.status === "linked" && linkedParty?.buyer_profile_id === buyerId, JSON.stringify(linkedParty));
+check("quyết định ghi lại người quyết và lý do", linkedParty?.decided_by === "owner@example.com" && Array.isArray(linkedParty?.reasons) && linkedParty.reasons.length === 2);
+check("quyết định giữ bên giao dịch của tờ khai", linkedParty?.side === "importer_side");
+
+const shipment = (await db.query("select supplier_name, supplier_country, shipment_date, record_reference, hs_code from public.trade_signals where buyer_profile_id = $1 and record_reference = 'BL-90001'", [buyerId])).rows;
+check("nối xong thì lô hàng tự vào trade_signals", shipment.length === 1, String(shipment.length));
+check("nhà cung cấp của lô là bên gửi hàng trên tờ khai", shipment[0]?.supplier_name === "VIET LONG EXPORT JSC" && shipment[0]?.supplier_country === "Viet Nam", JSON.stringify(shipment[0]));
+check("mã HS trong lô hàng giữ nguyên bản in", shipment[0]?.hs_code === "0801.32.00");
+
+const signalDates = (await db.query("select first_signal_at, last_signal_at from public.buyer_profiles where id = $1", [buyerId])).rows[0];
+check(
+  "ngày tín hiệu chỉ được mở rộng theo tờ khai, không bị thu hẹp",
+  new Date(signalDates?.first_signal_at).getTime() <= Date.parse("2026-04-02") && new Date(signalDates?.last_signal_at).getTime() >= Date.parse("2026-04-02"),
+  JSON.stringify(signalDates),
+);
+
+await linkCustoms(consigneeParty, buyerId, "manual", 60, [], "resolver");
+check("nối lại cùng một bên thì ghi đè quyết định, không thêm dòng", (await db.query("select count(*)::int as n from public.customs_entity_matches where customs_party_id = $1", [consigneeParty])).rows[0].n === 1);
+check("nhưng không nhân đôi lô hàng trong trade_signals", (await db.query("select count(*)::int as n from public.trade_signals where buyer_profile_id = $1 and record_reference = 'BL-90001'", [buyerId])).rows[0].n === 1);
+
+const sideCheck = await expectFailure(
+  `insert into public.customs_entity_matches (organization_id, customs_party_id, buyer_profile_id, status, side)
+   values ($1, $2, $3, 'linked', 'exporter_side')`,
+  [orgId, shipperParty, buyerId],
+  ["customs_entity_matches_side_can_link", "check constraint"],
+);
+check("ràng buộc DB chặn bên gửi hàng thành khách hàng, kể cả khi ghi thẳng", sideCheck.ok, sideCheck.message);
+
+const markLinked = await expectFailure(MARK_SQL, [shipperParty, "linked", null, null, [], "resolver"], "review hoặc unmatched");
+check("không dùng hàm đánh dấu để nối", markLinked.ok, markLinked.message);
+
+// Một tờ khai thứ hai: giữ lại một bên chưa quyết cho hàng đợi, và một bên đủ
+// dữ kiện để thử đường tạo hồ sơ khách hàng mới.
+const secondRecord = await recordCustoms(
+  "BL-90002",
+  "2026-07-15",
+  [
+    { role: "consignee", name: "NORTHWIND IMPORTS LTD", name_normalized: "northwind imports", country: "United Kingdom", country_iso: "GB", column: "Consignee Name" },
+    { role: "consignee", name: "AMBER TRADING CO LTD", name_normalized: "amber trading", country: "", column: "Consignee Name" },
+    { role: "shipper", name: "MEKONG FOODSTUFFS CO LTD", name_normalized: "mekong foodstuffs", country: "Viet Nam", country_iso: "VN", column: "Shipper Name" },
+  ],
+  { hsCode: "2106.90.99", product: "Food preparations nes", quantity: 640, unit: "CARTONS", weightKg: 9100, containers: 1, valueUsd: 22800, originCountry: "Viet Nam", destinationPort: "Felixstowe" },
+);
+check("tờ khai thứ hai ghi được", Boolean(secondRecord?.record_id) && secondRecord?.replayed === false);
+
+const amberParty = (await db.query("select id from public.customs_record_parties where customs_record_id = $1 and name_as_printed = 'AMBER TRADING CO LTD'", [secondRecord.record_id])).rows[0].id;
+const northwindParty = (await db.query("select id from public.customs_record_parties where customs_record_id = $1 and name_as_printed = 'NORTHWIND IMPORTS LTD'", [secondRecord.record_id])).rows[0].id;
+
+const noCountry = await expectFailure(CREATE_SQL, [amberParty, "resolver"], "không có quốc gia");
+check("thiếu quốc gia thì không tạo hồ sơ khách hàng", noCountry.ok, noCountry.message);
+const fromShipper = await expectFailure(CREATE_SQL, [shipperParty, "resolver"], "chỉ tạo được hồ sơ khách hàng từ bên nhận hàng");
+check("không tạo hồ sơ khách hàng từ bên gửi hàng", fromShipper.ok, fromShipper.message);
+
+const markedUnmatched = await markCustoms(amberParty, "unmatched", null, null, ["chưa có ứng viên nào đủ gần"], "owner@example.com");
+check("ghi được trạng thái chưa có ứng viên", markedUnmatched?.status === "unmatched" && markedUnmatched?.buyer_profile_id === null, JSON.stringify(markedUnmatched));
+
+const createdMatch = (await db.query(CREATE_SQL, [northwindParty, "owner@example.com"])).rows[0];
+check("tạo hồ sơ khách hàng từ tờ khai", createdMatch?.status === "created" && createdMatch?.method === "created_from_customs" && createdMatch?.confidence === 70, JSON.stringify(createdMatch));
+const createdBuyer = (await db.query("select legal_name, display_name, country, domain, address, website from public.buyer_profiles where id = $1", [createdMatch.buyer_profile_id])).rows[0];
+check("hồ sơ mới giữ đúng tên và quốc gia trên tờ khai", createdBuyer?.legal_name === "NORTHWIND IMPORTS LTD" && createdBuyer?.country === "United Kingdom", JSON.stringify(createdBuyer));
+check("hồ sơ mới không có tên miền hay địa chỉ tự nghĩ ra", createdBuyer?.domain === null && createdBuyer?.address === null && createdBuyer?.website === null);
+check("hồ sơ mới không có kênh liên hệ nào", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [createdMatch.buyer_profile_id])).rows[0].n === 0);
+check("lô hàng của hồ sơ mới cũng vào trade_signals", (await db.query("select count(*)::int as n from public.trade_signals where buyer_profile_id = $1", [createdMatch.buyer_profile_id])).rows[0].n === 1);
+const newBuyerDates = (await db.query("select first_signal_at, last_signal_at from public.buyer_profiles where id = $1", [createdMatch.buyer_profile_id])).rows[0];
+check(
+  "hồ sơ mới có ngày tín hiệu đúng bằng ngày tờ khai",
+  new Date(newBuyerDates?.first_signal_at).toISOString().startsWith("2026-07-15") && new Date(newBuyerDates?.last_signal_at).toISOString().startsWith("2026-07-15"),
+  JSON.stringify(newBuyerDates),
+);
+const alreadyLinked = await expectFailure(CREATE_SQL, [northwindParty, "resolver"], "đã được nối");
+check("không tạo lại hồ sơ cho bên đã nối", alreadyLinked.ok, alreadyLinked.message);
+
+// Đọc bằng phiên thành viên, qua đúng các view mà giao diện dùng.
+await db.query("set role authenticated");
+await asUser(userA);
+const customsSummary = (await db.query("select records_count, hs_codes, supplier_names, supplier_countries, match_methods, source_labels from public.buyer_customs_summary where buyer_profile_id = $1", [buyerId])).rows[0];
+check("thành viên đọc được tóm tắt lịch sử nhập khẩu", customsSummary?.records_count === 1, JSON.stringify(customsSummary));
+check("mã HS trong tóm tắt gom về HS6", JSON.stringify(customsSummary?.hs_codes) === JSON.stringify(["080132"]), JSON.stringify(customsSummary?.hs_codes));
+check("tóm tắt nêu nhà cung cấp và nước xuất hàng", JSON.stringify(customsSummary?.supplier_names) === JSON.stringify(["VIET LONG EXPORT JSC"]) && JSON.stringify(customsSummary?.supplier_countries) === JSON.stringify(["Viet Nam"]));
+check("tóm tắt nói rõ nguồn và cách nối", (customsSummary?.match_methods ?? []).includes("manual") && (customsSummary?.source_labels ?? []).includes("Hải quan — vận đơn công bố"), JSON.stringify(customsSummary));
+
+const customsRoleRows = (await db.query("select role, side, records_count from public.buyer_customs_roles where buyer_profile_id = $1 order by role", [buyerId])).rows;
+check("vai của khách hàng trên tờ khai đọc được", customsRoleRows.length === 1 && customsRoleRows[0].role === "consignee" && customsRoleRows[0].side === "importer_side", JSON.stringify(customsRoleRows));
+
+const queueRows = (await db.query("select name_as_printed, role, country_as_printed, counterparty_name, record_reference, match_status from public.customs_resolution_queue order by name_as_printed")).rows;
+check("hàng đợi chỉ có bên nhận hàng chưa nối hồ sơ", JSON.stringify(queueRows.map((row) => row.name_as_printed)) === JSON.stringify(["AMBER TRADING CO LTD"]), JSON.stringify(queueRows.map((row) => row.name_as_printed)));
+check("hàng đợi kèm bên đối tác để có bối cảnh", queueRows[0]?.counterparty_name === "MEKONG FOODSTUFFS CO LTD" && queueRows[0]?.record_reference === "BL-90002", JSON.stringify(queueRows[0]));
+check("trạng thái cũ của bên chưa nối đọc được trong hàng đợi", queueRows[0]?.match_status === "unmatched");
+check("bên gửi hàng không bao giờ vào hàng đợi", queueRows.every((row) => row.role !== "shipper"));
+
+const customsWrite = await expectFailure(
+  "insert into public.customs_records (organization_id, market_source_id, record_reference) values ($1, (select id from public.market_sources where key = 'customs_bol'), 'BL-90009')",
+  [orgId],
+  ["permission denied", "violates row-level security"],
+);
+check("thành viên không ghi thẳng được bảng tờ khai", customsWrite.ok, customsWrite.message);
+
+await asUser(userB);
+check("workspace khác không thấy tờ khai", (await db.query("select count(*)::int as n from public.customs_records")).rows[0].n === 0);
+check("workspace khác không thấy các bên trên tờ khai", (await db.query("select count(*)::int as n from public.customs_record_parties")).rows[0].n === 0);
+check("workspace khác không thấy quyết định nối", (await db.query("select count(*)::int as n from public.customs_entity_matches")).rows[0].n === 0);
+check("workspace khác không thấy tóm tắt hải quan", (await db.query("select count(*)::int as n from public.buyer_customs_summary")).rows[0].n === 0);
+check("workspace khác không thấy hàng đợi", (await db.query("select count(*)::int as n from public.customs_resolution_queue")).rows[0].n === 0);
+await asUser(userA);
+
+// Dọn phần dữ liệu chỉ để kiểm: hồ sơ tạo từ tờ khai và hồ sơ của workspace
+// khác, để các phép kiểm phía sau thấy đúng trạng thái như trước phần này.
+await db.query("reset role");
+await db.query("delete from public.trade_signals where record_reference like 'BL-9000%'");
+await db.query("delete from public.customs_entity_matches where buyer_profile_id = $1", [createdMatch.buyer_profile_id]);
+await db.query("delete from public.buyer_profiles where id = $1", [createdMatch.buyer_profile_id]);
+await db.query("delete from public.buyer_profiles where id = $1", [otherOrgBuyer]);
+await db.query("set role authenticated");
+await asUser(userA);
+
 // --- what may leave the building (export views) -------------------------------
 const rawChannelCount = (await db.query("select count(*)::int as n from public.contact_channels")).rows[0].n;
 const exportable = (await db.query("select value from public.outreach_ready_channels order by value")).rows.map((row) => row.value);

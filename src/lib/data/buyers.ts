@@ -2,6 +2,7 @@ import { cache } from "react";
 
 import { getSupabasePublicConfig } from "@/lib/supabase/config";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { loadBuyerCustoms } from "./customs";
 import { fetchWorkspaceAccount } from "./workspace";
 import {
   BUYER_CONTACT_COLUMNS,
@@ -20,6 +21,7 @@ import {
   type BuyerSummaryDbRow,
 } from "./buyer-view";
 
+export type { BuyerCustomsRow } from "@/lib/customs/view";
 export type {
   BuyerContactDbRow,
   BuyerContactRow,
@@ -104,6 +106,10 @@ export const loadBuyerList = cache(async (): Promise<BuyerListResult> => {
       (officerData ?? []) as unknown as RegistryOfficerDbRow[],
     );
 
+    // Lịch sử nhập khẩu (012): tờ khai đã nối với khách hàng. Chưa chạy 012
+    // hoặc chưa nối tờ khai nào thì map rỗng, danh sách chạy như trước.
+    const customsByBuyer = await loadBuyerCustoms();
+
     const { data: withheldData, error: withheldError } = await supabase
       .from("contact_export_policy")
       .select("buyer_profile_id")
@@ -125,6 +131,7 @@ export const loadBuyerList = cache(async (): Promise<BuyerListResult> => {
         withheldByBuyer,
         whatsappByChannel,
         registryByBuyer,
+        customsByBuyer,
       ),
     };
   } catch {

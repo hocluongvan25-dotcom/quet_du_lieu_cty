@@ -71,6 +71,11 @@ export type IntelNote = {
 export type CompanyReport = {
   /** Điều kiện & giấy tờ nhà nhập khẩu công bố đối với nhà cung cấp. */
   requirements?: Requirement[];
+  /**
+   * Lịch sử & vai nhập khẩu đọc từ tờ khai hải quan (012). Chỉ có khi công ty
+   * này đã được nối với ít nhất một tờ khai — chưa có thì không hiện khối.
+   */
+  customs?: import("@/lib/customs/view").BuyerCustomsRow | null;
   id: string;
   companyName: string;
   initials: string;
@@ -235,6 +240,24 @@ export const initialReports: CompanyReport[] = [marianiReport,
     initials: "VF",
     accent: "#28A88B",
     country: "Germany",
+    // Ví dụ về khối lịch sử nhập khẩu: số vận đơn, ngày, mã HS đều là số mẫu.
+    // Vận đơn công bố không có email/điện thoại nên khối này không có kênh nào.
+    customs: {
+      recordsCount: 2,
+      firstShipment: "2026-02-18",
+      lastShipment: "2026-06-30",
+      hsCodes: ["090240", "210690"],
+      productSamples: ["Black tea, fermented", "Food preparations nes"],
+      supplierNames: ["HARVEST LANKA EXPORTS (PVT) LTD"],
+      supplierCountries: ["Sri Lanka (LK)"],
+      sourceLabels: ["Hải quan — vận đơn công bố"],
+      matchMethods: ["exact_name_country"],
+      lastDecidedAt: "2026-10-04T10:05:00Z",
+      roles: [
+        { role: "importer", side: "importer_side", records_count: 2, last_shipment: "2026-06-30" },
+        { role: "notify_party", side: "unknown", records_count: 2, last_shipment: "2026-06-30" },
+      ],
+    },
     status: "needs_review",
     confidence: 67,
     createdAt: "02/10/2026",

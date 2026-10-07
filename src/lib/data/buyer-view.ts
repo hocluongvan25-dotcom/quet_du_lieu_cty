@@ -6,6 +6,7 @@
  */
 
 import { initialReports, type CompanyReport } from "@/lib/demo-data";
+import type { BuyerCustomsRow, CustomsQueueItem } from "@/lib/customs/view";
 
 /**
  * Danh sách buyer: đọc từ `buyer_outreach_summary` + `outreach_ready_contacts`
@@ -65,6 +66,12 @@ export type BuyerListRow = {
   lastContactSeenAt: string | null;
   /** Có khi bước 3 tra được sổ đăng ký; không tra được thì không có gì để hiện. */
   registry?: BuyerRegistryRow | null;
+  /**
+   * Lịch sử và vai nhập khẩu (012), đọc từ `buyer_customs_summary` +
+   * `buyer_customs_roles`. Chỉ có khi khách hàng đã nối ít nhất một tờ khai
+   * hải quan — chưa có lịch sử thì không hiện khối, không hiện số 0 vô nghĩa.
+   */
+  customs?: BuyerCustomsRow | null;
 };
 
 export type BuyerContactRow = {
@@ -226,6 +233,7 @@ export function toBuyerList(
   withheldByBuyer: Map<string, number>,
   whatsappByChannel: Map<string, { url: string; checkedBy: string | null }> = new Map(),
   registryByBuyer: Map<string, BuyerRegistryRow> = new Map(),
+  customsByBuyer: Map<string, BuyerCustomsRow> = new Map(),
 ): BuyerListPayload {
   const contacts: BuyerContactRow[] = contactRows.map((row) => ({
     buyerId: row.buyer_profile_id,
@@ -268,6 +276,7 @@ export function toBuyerList(
     lastSignalAt: row.last_signal_at,
     lastContactSeenAt: row.last_contact_seen_at,
     registry: registryByBuyer.get(row.buyer_profile_id) ?? null,
+    customs: customsByBuyer.get(row.buyer_profile_id) ?? null,
   }));
 
   return { buyers, contacts };
@@ -406,6 +415,91 @@ export function demoRegistryMatches(): Map<string, BuyerRegistryRow> {
   ]);
 }
 
+/**
+ * Lịch sử nhập khẩu mẫu cho dòng demo. File vận đơn thật không có email/điện
+ * thoại, nên khối này chỉ có ngày, mã HS, nhà cung cấp và vai — đúng như thứ
+ * dữ liệu hải quan công bố. Tên công ty, số vận đơn và số liệu đều là ví dụ.
+ */
+export function demoBuyerCustoms(): Map<string, BuyerCustomsRow> {
+  return new Map<string, BuyerCustomsRow>([
+    [
+      "report-thames",
+      {
+        recordsCount: 3,
+        firstShipment: "2025-11-04",
+        lastShipment: "2026-07-22",
+        hsCodes: ["080132", "200799", "210690"],
+        productSamples: ["Cashew nuts, shelled", "Fruit preparations", "Food preparations nes"],
+        supplierNames: ["VIET NAM AGRICARE JSC", "MEKONG FOODSTUFFS CO LTD"],
+        supplierCountries: ["Viet Nam (VN)"],
+        sourceLabels: ["Hải quan — vận đơn công bố"],
+        matchMethods: ["exact_name_country"],
+        lastDecidedAt: "2026-10-05T08:40:00Z",
+        roles: [
+          { role: "consignee", side: "importer_side", records_count: 3, last_shipment: "2026-07-22" },
+          { role: "notify_party", side: "unknown", records_count: 1, last_shipment: "2025-11-04" },
+        ],
+      },
+    ],
+  ]);
+}
+
+/**
+ * Hàng đợi Resolve mẫu: hai bên nhận hàng trên tờ khai chưa nối với hồ sơ nào —
+ * một bên có ứng viên mạnh, một bên không có ứng viên nào đủ gần. Tên công ty,
+ * số vận đơn và số liệu đều là ví dụ.
+ */
+export function demoCustomsQueue(): CustomsQueueItem[] {
+  return [
+    {
+      partyId: "demo-queue-1",
+      nameAsPrinted: "THAMES VALLEY FOODS LTD",
+      nameNormalized: "thames valley foods",
+      country: "United Kingdom",
+      countryIso2: "GB",
+      address: null,
+      website: "tvfoods.example",
+      sourceColumn: "Consignee Name",
+      role: "consignee",
+      side: "importer_side",
+      recordReference: "BL-2026-004417",
+      shipmentDate: "2026-07-22",
+      hsCode: "0801.32.00",
+      productDescription: "Cashew nuts, shelled",
+      sourceLabel: "Hải quan — vận đơn công bố",
+      status: null,
+      method: null,
+      confidence: null,
+      reasons: [],
+      counterpartyName: "VIET NAM AGRICARE JSC",
+      counterpartyCountry: "Viet Nam",
+    },
+    {
+      partyId: "demo-queue-2",
+      nameAsPrinted: "KYOTO MACHINE TOOLS KK",
+      nameNormalized: "kyoto machine tools",
+      country: "Japan (JP)",
+      countryIso2: "JP",
+      address: null,
+      website: null,
+      sourceColumn: "Importer Name",
+      role: "importer",
+      side: "importer_side",
+      recordReference: "BL-2026-004418",
+      shipmentDate: "2026-06-30",
+      hsCode: "8207.30.00",
+      productDescription: "Interchangeable tools for machines",
+      sourceLabel: "Hải quan — vận đơn công bố",
+      status: "review",
+      method: "fuzzy_name",
+      confidence: 45,
+      reasons: ["chưa có hồ sơ nào đủ gần — để người xem quyết"],
+      counterpartyName: "HARVEST LANKA EXPORTS (PVT) LTD",
+      counterpartyCountry: "Sri Lanka",
+    },
+  ];
+}
+
 export function demoBuyerList(): BuyerListPayload {
   const buyers: BuyerListRow[] = [];
   const contacts: BuyerContactRow[] = [];
@@ -476,6 +570,7 @@ export function demoBuyerList(): BuyerListPayload {
       lastSignalAt: null,
       lastContactSeenAt: report.lastUpdated ?? null,
       registry: demoRegistryMatches().get(report.id) ?? null,
+      customs: demoBuyerCustoms().get(report.id) ?? null,
     });
   });
 
@@ -495,6 +590,7 @@ export function demoBuyerList(): BuyerListPayload {
     lastSignalAt: null,
     lastContactSeenAt: null,
     registry: demoRegistryMatches().get("report-thames") ?? null,
+    customs: demoBuyerCustoms().get("report-thames") ?? null,
   });
 
   return { buyers, contacts };

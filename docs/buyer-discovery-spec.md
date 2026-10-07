@@ -788,6 +788,95 @@ Chưa chạy migration 011, hoặc chưa tra sổ lần nào → hai truy vấn 
 
 ### Kiểm chứng
 
-- `npm run persist:test` — **108 check** (trước vòng này 71): batch mang kết quả sổ, chặn dữ liệu không phải lần đối chiếu; ghi vào Postgres thật (PGlite, 11 migration), chống trùng, thêm dòng khi kết quả khác, `organization_id` suy từ buyer, người thiếu tên bị bỏ, ranh giới tenant, người dùng thường không ghi thẳng được.
-- `npm run db:verify` — 11 migration, thêm mục 011: hàm ghi, chống trùng, view latest, năm kiểu dữ liệu sai bị từ chối, RLS hai chiều, và "bảng người đương nhiệm không có cột liên hệ nào".
-- `npm run export:test` — **54 check** (trước 43): ghép lần đối chiếu với người của nó, không ghép lẫn lần khác, chưa tra sổ thì không có khối, CSV vẫn 15 cột và **không** lẫn dữ liệu sổ.
+- `npm run persist:test` — **108 check** ở vòng 011, nay **144 check** (xem §24): batch mang kết quả sổ, chặn dữ liệu không phải lần đối chiếu; ghi vào Postgres thật (PGlite, 12 migration), chống trùng, thêm dòng khi kết quả khác, `organization_id` suy từ buyer, người thiếu tên bị bỏ, ranh giới tenant, người dùng thường không ghi thẳng được.
+- `npm run db:verify` — 12 migration (mục 012 ở §24), thêm mục 011: hàm ghi, chống trùng, view latest, năm kiểu dữ liệu sai bị từ chối, RLS hai chiều, và "bảng người đương nhiệm không có cột liên hệ nào".
+- `npm run export:test` — **54 check** (trước 43) ở vòng 011, nay **58 check** (§24): ghép lần đối chiếu với người của nó, không ghép lẫn lần khác, chưa tra sổ thì không có khối, CSV vẫn 15 cột và **không** lẫn dữ liệu sổ.
+
+## 24. Dữ liệu hải quan: vai trên tờ khai, luồng Resolve, và lịch sử nhập khẩu trên báo cáo (07/10/2026)
+
+**Người yêu cầu:** người dùng, 07/10/2026 — chọn hướng "Dữ liệu hải quan" với ba việc: xử lý dữ liệu vận đơn/tờ khai để xác định `shipper_role`, khởi tạo luồng Resolve tên pháp nhân từ tờ khai sang `buyer_profiles`, và hiển thị tóm tắt lịch sử/vai trò nhập khẩu lên giao diện Báo cáo Buyer.
+
+### Vì sao tách thành ba tầng
+
+Một tờ khai nói rất ít về liên hệ và rất nhiều về quan hệ. Vận đơn công bố **không có email, không có điện thoại** — nên cả ba bảng mới không có một cột liên hệ nào, và `db:verify` khẳng định điều đó thay vì tin vào lời hứa trong tài liệu. Thứ tờ khai cho là: bên nào tham gia, **với vai gì**, trên lô hàng nào.
+
+Vì vậy dữ liệu được chia làm ba tầng, và tầng nào cũng có chỗ của mình:
+
+| Tầng | Ở đâu | Nói gì | Không được làm gì |
+| --- | --- | --- | --- |
+| **Bản in** | `customs_records`, `customs_record_parties` | đúng thứ tờ khai ghi: tên, quốc gia, địa chỉ, mã HS, số vận đơn, và cột nguồn (`source_column`) | không viết lại tên, không sửa quốc gia |
+| **Suy ra** | `customs_side_for(role)`, `name_normalized`, `country_iso2` | bên nào của giao dịch; tên đã chuẩn hoá để tra; mã ISO-2 để đối chiếu | không thay thế bản in, không tự quyết định ai là khách hàng |
+| **Quyết định** | `customs_entity_matches` | bên này ứng với hồ sơ khách hàng nào, do ai, bằng bằng chứng gì | không bao giờ biến bên gửi hàng thành khách hàng |
+
+### `shipper_role` — vai đọc từ tên cột, không đoán từ vị trí
+
+Vai nằm ở **tên cột** của file: `Shipper Name`, `Consignee`, `Importer`, `Buyer`, `Notify Party`. `src/lib/customs/columns.ts` là bảng ánh xạ tên cột → trường, và nó in ra bảng đối chiếu trước khi ghi: cột nào nhận ra, vào trường nào, cột nào bị bỏ qua. Hai luật cứng:
+
+1. **File không có cột vai thì không nhập được.** Không suy vai từ thứ tự cột hay vị trí trong dòng.
+2. **Cột của một bên phải là cột của bên đó.** `Consignee Country` là quốc gia của bên nhận hàng, không bao giờ là quốc gia xuất xứ; `Shipper Email` bị bỏ qua (và vận đơn công bố cũng không có cột đó) chứ không được ghi thành kênh.
+
+File gọi bên mua là `Buyer` thì mình ghi lại **nguyên văn tên cột** trong `source_column` và xếp vai theo nghĩa hẹp nhất mà file nói (`importer`) — người đọc sau vẫn truy được vì sao bên đó được xếp vai ấy.
+
+Vai → bên giao dịch nằm ở một hàm bất biến trong DB:
+
+```sql
+customs_side_for('importer')      = 'importer_side'
+customs_side_for('consignee')     = 'importer_side'
+customs_side_for('shipper')       = 'exporter_side'
+customs_side_for('notify_party')  = 'unknown'
+customs_side_for('other')         = 'unknown'
+```
+
+`notify_party` cố ý để `unknown`. Bên được thông báo có thể là hãng tàu, ngân hàng hoặc đại lý hải quan — suy ra "đây là bên mua" từ đó là bịa. Bảng này được kiểm ở **cả hai phía**: `db:verify` gọi hàm SQL, `customs:test` gọi bản TypeScript `customsSideFor()` trong `src/lib/customs/normalize.ts`, và cả hai đối chiếu với cùng một bảng kỳ vọng. Lệch nhau là test đỏ.
+
+### Luồng Resolve — từ tờ khai sang `buyer_profiles`
+
+Hàng đợi là view `customs_resolution_queue`: **chỉ bên nhận hàng** (`importer_side`) chưa nối với hồ sơ nào, kèm bên đối tác trên cùng tờ khai để người xem có bối cảnh. Bên gửi hàng không vào hàng đợi — đó là nhà cung cấp, không phải việc cần quyết.
+
+Ba đường ra, và chúng khác nhau:
+
+- **`link_customs_party`** — nối với một hồ sơ đã có. Từ chối mọi bên không phải importer-side; từ chối hồ sơ thuộc workspace khác; và **ghi luôn lô hàng vào `trade_signals`** để "đã nối" bao giờ cũng đi kèm "có lịch sử". Nhà cung cấp của lô lấy từ chính bên gửi hàng trên tờ khai. Nối lại cùng một bên thì ghi đè quyết định, không thêm dòng, không nhân đôi lô.
+- **`mark_customs_party`** — ghi `review` (có ứng viên, chờ người quyết) hoặc `unmatched` (không có gì để chọn). Hai trạng thái này khác nhau và không được trộn: "chưa chọn" và "không có gì để chọn" là hai câu trả lời khác nhau. Hàm này **không** nối được — nối là việc của hàm kia.
+- **`create_buyer_from_customs_party`** — chỉ chạy khi người dùng chọn. Thiếu quốc gia trên tờ khai thì từ chối (không biết đang nói về ai ở đâu thì không tạo hồ sơ); có đúng một hồ sơ cùng tên thì nối vào (`exact_name`, 80); có nhiều hơn một thì chuyển sang `review` (30) chứ không đoán; không có thì tạo hồ sơ mới (`created_from_customs`, 70) với tên và quốc gia **đúng như tờ khai**, không tên miền, không địa chỉ, không kênh liên hệ nào.
+
+Ràng buộc cuối cùng nằm ở DB, không ở tài liệu:
+
+```sql
+constraint customs_entity_matches_side_can_link
+  check (side = 'importer_side' or buyer_profile_id is null)
+```
+
+Bên gửi hàng không thể thành khách hàng kể cả khi ai đó `insert` thẳng vào bảng. `db:verify` thử đúng đường đó để chắc rằng ràng buộc còn sống.
+
+**Gợi ý thì không phải quyết định.** `src/lib/customs/resolve.ts` xếp hạng ứng viên theo *bằng chứng*: trùng tên miền website công bố (96) > trùng tên khít + cùng quốc gia (88) > trùng tên khít (80) > tên gần giống (40–70), mỗi mức kèm lý do đọc được. Khác quốc gia hay khác tên miền được nói ra như **lý do chống nối**, không bị giấu. Hàm trả về mảng rỗng cho bên gửi hàng, và không đề xuất gì khi không có ứng viên đủ gần — im lặng đúng chỗ.
+
+### Nhập file
+
+`src/lib/customs/import.ts` đọc CSV (RFC 4180: ô bọc nháy, dấu phẩy và xuống dòng trong ô, BOM, CRLF), dựng payload theo bảng ánh xạ cột, rồi ghi qua bốn hàm RPC. Những gì **không** được làm:
+
+- **Không đoán ngày.** `05/03/2026` là ngày 5 tháng 3 hay 3 tháng 5? Không tự chọn: ngày để trống, dòng vẫn vào, và bộ đếm `ambiguousDates` báo lại để người nhập chọn thứ tự ngày/tháng rồi nhập lại. `13/05/2026` thì tự biết. Một ngày sai trong báo cáo lịch sử nhập khẩu là một khẳng định sai về hoạt động của công ty người ta.
+- **Không tạo bản sao.** Khoá là (workspace, nguồn, số vận đơn). Nhập lại cùng file: `replayed = 2`, không thêm tờ khai, không thêm bên, không thêm lô hàng, và quyết định đã ra vẫn nguyên.
+- **Không ghi khi thiếu nguồn.** Chưa có dòng trong `market_sources` thì hàm ghi từ chối và thông báo của DB được trả nguyên văn cho người nhập đọc.
+- **Không im lặng.** Báo cáo của lần nhập nói rõ: số dòng, số tờ khai ghi mới, số nhập lại, số dòng thiếu số vận đơn, số dòng lặp trong file, số dòng có ngày mơ hồ, số lô không có bên nhận hàng, và từng lỗi kèm số vận đơn.
+
+### Trên giao diện
+
+- **Báo cáo Buyer** (khối trong drawer) và **dòng mở rộng của danh sách buyer**: khối **"Lịch sử nhập khẩu"** — chip vai (kèm `×số lô` và lần cuối), khoảng thời gian, mã HS6, hàng hoá, nhà cung cấp + nước xuất hàng, nguồn, cách nối — và dòng cuối nói thẳng: *"Vận đơn công bố không có email hay điện thoại — khối này chỉ nói công ty đã nhập gì, từ đâu, khi nào."*
+- **Hàng đợi Resolve** ở đầu trang buyer: từng bên nhận hàng chưa nối, ứng viên kèm điểm và lý do, nút nối / tạo hồ sơ mới / chờ xem sau / chưa có ứng viên. Ghi qua `POST /api/customs`: đọc bên đó bằng **phiên của người dùng trước** (RLS quyết định — không đọc được nghĩa là không thuộc workspace này), rồi mới ghi bằng service role. `organization_id` không bao giờ lấy từ request body.
+
+Mã HS: bảng giữ **nguyên bản in** (`0801.32.00`), view tóm tắt gom về **HS6** (`080132`) để đếm và gom nhóm — hai bản, hai việc, giống `value` / `phone_e164`.
+
+### Về chuyện "hiển thị số 0"
+
+Chưa nối tờ khai nào thì **không hiện khối nào** — không hiện "0 lô hàng". Một công ty chưa từng được đối chiếu với dữ liệu hải quan và một công ty thật sự không nhập gì là hai chuyện khác nhau, và giao diện không được nói sai chuyện nào.
+
+### Việc còn lại trước khi nhập dữ liệu thật
+
+`market_sources` cần một dòng cho khoá nguồn hải quan (ví dụ `customs_bol`) — 012 giữ nguyên luật của 005: thiếu khoá thì hàm ghi từ chối. Cấu trúc file thật của nhà cung cấp dữ liệu vẫn cần người dùng xác nhận trước lần nhập đầu; bảng ánh xạ cột đã in ra để đối chiếu, nên lệch tên cột sẽ lộ ra ngay ở bước đó chứ không âm thầm vào sai chỗ.
+
+### Kiểm chứng
+
+- `npm run customs:test` — **105 check** (bộ mới): đọc CSV (ô bọc nháy, dấu phẩy, xuống dòng, BOM, CRLF), bảng ánh xạ cột, chuẩn hoá tên/số/ngày, dựng payload, đếm đúng thứ bị bỏ, xếp hạng ứng viên, và bảng vai → bên.
+- `npm run persist:test` — **144 check** (trước vòng này 108): toàn bộ đường nhập chạy trên Postgres thật (PGlite, 12 migration) — hai tờ khai, bên được suy side bằng trigger, nối → `trade_signals`, view tóm tắt, hàng đợi, tạo hồ sơ mới, nhập lại không nhân đôi, nguồn chưa đăng ký thì từ chối.
+- `npm run db:verify` — 12 migration; mục 012 kiểm hàm ghi, chống trùng, ba thông báo từ chối, ràng buộc `side_can_link` (thử cả đường ghi thẳng), RLS hai chiều (thành viên đọc được, workspace khác không thấy gì, thành viên không ghi thẳng được), và "không bảng nào có cột liên hệ".
+- `npm run export:test` — **58 check** (trước 54): khối hải quan theo đúng buyer, chưa nối thì không có khối, CSV vẫn **đúng 15 cột** và không mang theo tên nhà cung cấp hay mã HS.

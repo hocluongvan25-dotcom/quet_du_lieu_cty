@@ -14,6 +14,7 @@
     "report:test": "node scripts/test-report-sections.mjs",
     "requirements:test": "node scripts/test-requirements.mjs",
     "persist:test": "node scripts/test-persist.mjs",
+    "customs:test": "node scripts/test-customs.mjs",
     "roles:test": "node scripts/test-roles.mjs",
     "reverify:test": "node scripts/test-reverify.mjs",
     "reverify:run": "node scripts/run-reverify.mjs",

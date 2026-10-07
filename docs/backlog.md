@@ -95,14 +95,25 @@ Việc cần làm trước khi cắm: chọn 2–3 hội chợ/hiệp hội ngà
 
 ---
 
-## 4. `shipper_role` — vai của bên Việt Nam trên tờ khai
+## 4. ~~`shipper_role` — vai của bên Việt Nam trên tờ khai~~ — **xong 07/10/2026**
 
 **Phát sinh:** trong danh sách việc của vòng 10, chưa làm.
+**Đã xong:** migration `012_customs_parties.sql` (`customs_records` + `customs_record_parties` + `customs_entity_matches`, hàm `customs_side_for`, bốn hàm ghi, ba view), bảng ánh xạ cột + bộ nhập CSV trong `src/lib/customs/`, hàng đợi Resolve và khối "Lịch sử nhập khẩu" trên giao diện — spec §24. Kiểm: `customs:test` 105 check, `persist:test` 144 check, `db:verify` 12 migration, `export:test` 58 check.
 
 Tờ khai hải quan Mỹ có nhiều bên (importer, consignee, shipper, notify party).
-Cần một trường nói rõ **bên Việt Nam đang là vai nào** trước khi coi họ là khách
-hàng hay là nhà cung cấp — nếu không thì mọi kết luận về sau đều dựa trên một
-phỏng đoán về việc ai là ai. Việc này phụ thuộc dữ liệu hải quan (mục ngân sách).
+Vai giờ đọc từ **tên cột của file** (không suy từ vị trí), suy sang bên giao dịch
+bằng một hàm bất biến trong DB, và ràng buộc `customs_entity_matches_side_can_link`
+ép bằng DB rằng **bên gửi hàng không bao giờ thành khách hàng** — kể cả khi ghi
+thẳng vào bảng.
+
+### Còn lại của mục này (chưa xong, cần người dùng)
+
+- **Cấu trúc file thật của nhà cung cấp dữ liệu hải quan** chưa được xác nhận.
+  Bảng ánh xạ cột đã in ra khi nhập nên lệch sẽ lộ ngay, nhưng lần nhập thật đầu
+  tiên vẫn nên có người đối chiếu.
+- **`market_sources` chưa có dòng cho khoá nguồn hải quan** (ví dụ `customs_bol`).
+  012 giữ luật 005: thiếu khoá thì hàm ghi từ chối, nên đây là bước bắt buộc
+  trước lần nhập đầu.
 
 ---
 

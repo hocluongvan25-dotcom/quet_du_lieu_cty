@@ -8,7 +8,7 @@
  *
  *  1. Dựng dữ liệu (hàm thuần): thiếu gì thì từ chối, thừa gì thì bỏ, và
  *     không bao giờ sinh email theo pattern.
- *  2. Ghi thật vào Postgres trong tiến trình (PGlite) với đúng 10 migration,
+ *  2. Ghi thật vào Postgres trong tiến trình (PGlite) với đủ 12 migration,
  *     rồi đọc lại qua chính các view mà ứng dụng dùng
  *     (`contact_export_policy`, `buyer_outreach_summary`, `outreach_ready_contacts`).
  *
@@ -170,6 +170,70 @@ async function bootDatabase() {
 }
 
 /**
+ * `CustomsStore` chạy thẳng SQL trên PGlite. Trong production là bốn hàm RPC
+ * của 012 qua service role; ở đây gọi đúng bốn hàm đó — nên luật nằm trong DB
+ * (bên gửi hàng không thành khách hàng, thiếu nguồn thì không ghi) được kiểm
+ * thật chứ không chỉ được mô tả lại bằng JavaScript.
+ */
+function pgliteCustomsStore(db) {
+  return {
+    async recordRecord(input) {
+      const parties = input.parties.map((party) => ({
+        role: party.role,
+        name: party.name,
+        name_normalized: party.nameNormalized,
+        country: party.country ?? null,
+        country_iso: party.countryIso2 ?? null,
+        address: party.address ?? null,
+        website: party.website ?? null,
+        column: party.column ?? null,
+      }));
+      const { rows } = await db.query(
+        `select * from public.record_customs_record($1, $2, $3, $4::date, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb)`,
+        [
+          input.organizationId,
+          input.sourceKey,
+          input.recordReference,
+          input.shipmentDate ?? null,
+          input.hsCode ?? null,
+          input.productDescription ?? null,
+          input.quantity ?? null,
+          input.quantityUnit ?? null,
+          input.weightKg ?? null,
+          input.containers ?? null,
+          input.valueUsd ?? null,
+          input.originCountry ?? null,
+          input.destinationPort ?? null,
+          JSON.stringify(parties),
+        ],
+      );
+      return rows[0];
+    },
+
+    async link(input) {
+      const { rows } = await db.query(
+        `select * from public.link_customs_party($1, $2, $3::public.customs_match_method, $4, $5::text[], $6)`,
+        [input.partyId, input.buyerProfileId, input.method, input.confidence, input.reasons ?? [], input.decidedBy ?? "resolver"],
+      );
+      return rows[0];
+    },
+
+    async mark(input) {
+      const { rows } = await db.query(
+        `select * from public.mark_customs_party($1, $2::public.customs_match_status, $3::public.customs_match_method, $4, $5::text[], $6)`,
+        [input.partyId, input.status, input.method ?? null, input.confidence ?? null, input.reasons ?? [], input.decidedBy ?? "resolver"],
+      );
+      return rows[0];
+    },
+
+    async createBuyer(input) {
+      const { rows } = await db.query(`select * from public.create_buyer_from_customs_party($1, $2)`, [input.partyId, input.decidedBy ?? "resolver"]);
+      return rows[0];
+    },
+  };
+}
+
+/**
  * `BuyerStore` chạy thẳng SQL. Trong production là PostgREST qua service role;
  * ở đây là Postgres thật, nên ràng buộc và check của migration được kiểm thật.
  */
@@ -322,7 +386,9 @@ async function main() {
   await writeFile(
     entryPath,
     `import { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOURCE_KEY } from "@/lib/connector/persist";
-export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOURCE_KEY };
+import { importCustomsCsv } from "@/lib/customs/import";
+import { toBuyerCustomsByBuyer, toCustomsQueueItem } from "@/lib/customs/view";
+export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOURCE_KEY, importCustomsCsv, toBuyerCustomsByBuyer, toCustomsQueueItem };
 `,
     "utf8",
   );
@@ -450,9 +516,9 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   );
 
   // ------------------------------------------------- 2. ghi vào Postgres thật --
-  section("ghi vào Postgres thật (PGlite, đủ 11 migration)");
+  section("ghi vào Postgres thật (PGlite, đủ 12 migration)");
   const { db, migrationCount } = await bootDatabase();
-  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 11, String(migrationCount));
+  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 12, String(migrationCount));
 
   await db.query(
     `insert into auth.users (id, email, raw_user_meta_data)
@@ -805,6 +871,152 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   }
   check("không thể gán nhãn sai cho một email đã đoán", inconsistentKind.includes("contact_channels_email_kind_consistent"), inconsistentKind);
   await db.query("delete from public.contact_channels where id = $1", [guessedChannelId]);
+
+  // ------------------------------------------- 2c. dữ liệu hải quan (012) ------
+  section("tờ khai hải quan ghi vào database (012)");
+
+  // Nguồn phải có dòng trong `market_sources` trước (luật của 005 do 012 giữ).
+  await db.query(
+    `insert into public.market_sources (key, display_name, kind, licence_type, notes)
+     values ('customs_bol_test', 'Hải quan — vận đơn công bố (test)', 'trade_data', 'public_record', 'nguồn cho bộ test')
+     on conflict (key) do nothing`,
+  );
+
+  const customsStore = pgliteCustomsStore(db);
+  const CUSTOMS_CSV = [
+    "Bill of Lading Number,Shipment Date,Shipper Name,Shipper Country,Consignee Name,Consignee Country,Consignee Address,HS Code,Product Description,Quantity,Quantity Unit,Weight (kg),Value USD,Port of Discharge",
+    'BL-77001,2026-03-04,"AGRICARE JSC, LTD.",Viet Nam,"ACME FOODS INC.","United States",,0801.32.00,"Cashew nuts, shelled",1200,CARTONS,18240.5,54000,Oakland',
+    'BL-77002,2026-06-18,MEKONG FOODSTUFFS CO LTD,Viet Nam,NORTHWIND IMPORTS LTD,United Kingdom,,2106.90.99,"Food preparations nes",640,CARTONS,9100,22800,Felixstowe',
+  ].join("\n");
+
+  const customsReport = await api.importCustomsCsv(customsStore, {
+    organizationId: realOrgId,
+    sourceKey: "customs_bol_test",
+    text: CUSTOMS_CSV,
+  });
+  check("nhập được hai tờ khai qua tầng ghi thật", customsReport.imported === 2 && customsReport.failures.length === 0, JSON.stringify(customsReport.failures));
+
+  const recordRows = (await db.query("select id, record_reference, shipment_date, hs_code, containers from public.customs_records order by record_reference")).rows;
+  check("tờ khai nằm trong bảng với khoá riêng", recordRows.length === 2 && recordRows[0].record_reference === "BL-77001");
+  check("mã HS giữ nguyên bản in (không tự chuẩn hoá trong bảng)", recordRows[0].hs_code === "0801.32.00");
+
+  const partyRows = (
+    await db.query("select id, role, side, name_as_printed, name_normalized, country_as_printed from public.customs_record_parties order by name_as_printed, role")
+  ).rows;
+  check("bốn bên được ghi cho hai tờ khai", partyRows.length === 4, String(partyRows.length));
+  check(
+    "bên được suy sang bên giao dịch ngay trong DB",
+    partyRows.find((row) => row.name_as_printed === "AGRICARE JSC, LTD.")?.side === "exporter_side" &&
+      partyRows.find((row) => row.name_as_printed === "ACME FOODS INC.")?.side === "importer_side",
+  );
+  check("tên chuẩn hoá được ghi kèm bản in", partyRows.find((row) => row.name_as_printed === "ACME FOODS INC.")?.name_normalized === "acme foods");
+  check(
+    "vận đơn không mang theo kênh liên hệ nào",
+    (await db.query("select count(*)::int as n from information_schema.columns where table_schema = 'public' and table_name in ('customs_records','customs_record_parties','customs_entity_matches') and column_name in ('email','phone','phone_e164','value','contact')")).rows[0].n === 0,
+  );
+
+  const acmePartyId = partyRows.find((row) => row.name_as_printed === "ACME FOODS INC.")?.id;
+  const shipperPartyId = partyRows.find((row) => row.name_as_printed === "AGRICARE JSC, LTD.")?.id;
+
+  check("bên gửi hàng không được nối thành khách hàng", await (async () => {
+    try {
+      await customsStore.link({ partyId: shipperPartyId, buyerProfileId: buyerRow.id, method: "manual", confidence: 50 });
+      return false;
+    } catch (error) {
+      return error.message.includes("chỉ bên nhận hàng");
+    }
+  })());
+
+  const linked = await customsStore.link({
+    partyId: acmePartyId,
+    buyerProfileId: buyerRow.id,
+    method: "exact_name",
+    confidence: 80,
+    reasons: ["tên trên tờ khai khớp hồ sơ Acme Foods"],
+  });
+  check("nối được bên nhận hàng với hồ sơ khách hàng", linked.status === "linked" && linked.buyer_profile_id === buyerRow.id, JSON.stringify(linked));
+
+  const signalRows = (await db.query("select supplier_name, supplier_country, shipment_date, hs_code, record_reference from public.trade_signals where buyer_profile_id = $1 and record_reference = 'BL-77001'", [buyerRow.id])).rows;
+  check("nối xong thì lô hàng tự vào trade_signals", signalRows.length === 1, String(signalRows.length));
+  check("nhà cung cấp của lô hàng là bên gửi hàng", signalRows[0]?.supplier_name === "AGRICARE JSC, LTD." && signalRows[0]?.supplier_country === "Viet Nam", JSON.stringify(signalRows[0]));
+  const partyCountry = (await db.query("select country_as_printed, country_iso2 from public.customs_record_parties where id = $1", [shipperPartyId])).rows[0];
+  check("quốc gia giữ bản in, mã ISO nằm ở cột riêng", partyCountry?.country_as_printed === "Viet Nam" && partyCountry?.country_iso2 === "VN", JSON.stringify(partyCountry));
+
+  const buyerAfter = (await db.query("select first_signal_at, last_signal_at from public.buyer_profiles where id = $1", [buyerRow.id])).rows[0];
+  check(
+    "ngày tín hiệu của khách hàng được cập nhật theo tờ khai",
+    new Date(buyerAfter?.first_signal_at).toISOString().startsWith("2026-03-04"),
+    JSON.stringify(buyerAfter),
+  );
+
+  // Đọc lại qua đúng hai view mà giao diện dùng.
+  const customsSummary = (await db.query("select * from public.buyer_customs_summary where buyer_profile_id = $1", [buyerRow.id])).rows[0];
+  const customsRoles = (await db.query("select buyer_profile_id, role, side, records_count from public.buyer_customs_roles where buyer_profile_id = $1", [buyerRow.id])).rows;
+  const displayRow = api.toBuyerCustomsByBuyer([customsSummary], customsRoles).get(buyerRow.id);
+  check(
+    "view tóm tắt trả về đúng số lô và khoảng thời gian",
+    displayRow?.recordsCount === 1 && new Date(displayRow.firstShipment).toISOString().startsWith("2026-03-04"),
+    JSON.stringify({ count: displayRow?.recordsCount, first: displayRow?.firstShipment }),
+  );
+  check("mã HS trong tóm tắt gom về 6 chữ số của bảng mã quốc tế", JSON.stringify(displayRow?.hsCodes) === JSON.stringify(["080132"]), JSON.stringify(displayRow?.hsCodes));
+  check("khối hiển thị có vai nhập khẩu kèm số lô", displayRow?.roles.some((role) => role.side === "importer_side" && role.records_count === 1));
+  check("khách hàng chưa nối tờ khai nào không có khối hải quan", api.toBuyerCustomsByBuyer([customsSummary], []).get("khong-co") === undefined);
+
+  const queueRows = (await db.query("select * from public.customs_resolution_queue order by record_reference")).rows;
+  check("hàng đợi chỉ còn bên nhận hàng chưa nối", queueRows.length === 1 && queueRows[0].name_as_printed === "NORTHWIND IMPORTS LTD", JSON.stringify(queueRows.map((row) => row.name_as_printed)));
+  check("hàng đợi kèm bên đối tác để có bối cảnh", queueRows[0]?.counterparty_name === "MEKONG FOODSTUFFS CO LTD");
+  const queueItem = api.toCustomsQueueItem(queueRows[0]);
+  check("dòng hàng đợi giữ tên cột nguồn", queueItem.sourceColumn === "Consignee Name", String(queueItem.sourceColumn));
+
+  // Tạo hồ sơ khách hàng từ tờ khai: chỉ khi có quốc gia, và không tạo hai lần.
+  const created = await customsStore.createBuyer({ partyId: queueRows[0].customs_party_id });
+  check("tạo được hồ sơ khách hàng từ tờ khai có quốc gia", created.status === "created" && created.method === "created_from_customs", JSON.stringify(created));
+  const createdBuyer = (await db.query("select legal_name, country, organization_id from public.buyer_profiles where id = $1", [created.buyer_profile_id])).rows[0];
+  check("hồ sơ mới giữ đúng tên và quốc gia trên tờ khai", createdBuyer?.legal_name === "NORTHWIND IMPORTS LTD" && createdBuyer?.country === "United Kingdom", JSON.stringify(createdBuyer));
+  check("hồ sơ mới thuộc workspace đang nhập", createdBuyer?.organization_id === realOrgId);
+  check("tạo hồ sơ không tự sinh kênh liên hệ nào", (await db.query("select count(*)::int as n from public.contact_channels where buyer_profile_id = $1", [created.buyer_profile_id])).rows[0].n === 0);
+  check("hàng đợi rỗng sau khi đã quyết cả hai bên", (await db.query("select count(*)::int as n from public.customs_resolution_queue")).rows[0].n === 0);
+
+  // Nhập lại đúng file cũ: không thêm tờ khai, không nhân đôi lô hàng.
+  const replayCustoms = await api.importCustomsCsv(customsStore, { organizationId: realOrgId, sourceKey: "customs_bol_test", text: CUSTOMS_CSV });
+  check("nhập lại file cũ: hai tờ khai đều là nhập lại", replayCustoms.replayed === 2 && replayCustoms.imported === 0, JSON.stringify({ replayed: replayCustoms.replayed }));
+  check("nhập lại không nhân đôi tờ khai", (await db.query("select count(*)::int as n from public.customs_records")).rows[0].n === 2);
+  check("nhập lại không nhân đôi bên", (await db.query("select count(*)::int as n from public.customs_record_parties")).rows[0].n === 4);
+  check("nhập lại không nhân đôi lô hàng trong trade_signals", (await db.query("select count(*)::int as n from public.trade_signals where record_reference = 'BL-77001'")).rows[0].n === 1);
+  check(
+    "bên đã nối vẫn giữ nguyên quyết định sau khi nhập lại",
+    (await db.query("select status, method from public.customs_entity_matches where customs_party_id = $1", [acmePartyId])).rows[0]?.status === "linked",
+  );
+  check("nhập lại vẫn giữ mã ISO đã suy ra", (await db.query("select country_iso2 from public.customs_record_parties where id = $1", [shipperPartyId])).rows[0]?.country_iso2 === "VN");
+
+  // Nguồn chưa có trong market_sources: không ghi được, và nói rõ vì sao.
+  const unregistered = await api.importCustomsCsv(customsStore, { organizationId: realOrgId, sourceKey: "customs_nguon_la", text: CUSTOMS_CSV });
+  check("nguồn chưa đăng ký thì bị từ chối kèm lý do đọc được", unregistered.failures.length === 2 && unregistered.failures[0].message.includes("market_sources"), unregistered.failures[0]?.message);
+  check("bị từ chối thì không có tờ khai nào được ghi thêm", (await db.query("select count(*)::int as n from public.customs_records")).rows[0].n === 2);
+
+  // Ghi chú "chờ xem"/"chưa có ứng viên" — hai trạng thái khác nhau.
+  await db.query(
+    `insert into public.market_sources (key, display_name, kind) values ('customs_bol_test_2', 'Hải quan — bộ kiểm thứ hai', 'trade_data') on conflict (key) do nothing`,
+  );
+  await api.importCustomsCsv(customsStore, {
+    organizationId: realOrgId,
+    sourceKey: "customs_bol_test_2",
+    text: [
+      "BOL,Consignee Name,Consignee Country,Shipper Name,Shipper Country",
+      "BL-88001,AMBER TRADING CO LTD,Canada,VIET LONG EXPORT JSC,Viet Nam",
+    ].join("\n"),
+  });
+  const amberParty = (await db.query("select id from public.customs_record_parties where name_as_printed = 'AMBER TRADING CO LTD'")).rows[0].id;
+  const marked = await customsStore.mark({ partyId: amberParty, status: "review", method: "fuzzy_name", confidence: 45, reasons: ["hai hồ sơ gần giống"] });
+  check("ghi được trạng thái chờ xem kèm lý do", marked.status === "review" && marked.buyer_profile_id === null, JSON.stringify(marked));
+  check("bên chờ xem vẫn nằm trong hàng đợi", (await db.query("select count(*)::int as n from public.customs_resolution_queue where customs_party_id = $1", [amberParty])).rows[0].n === 1);
+  let markLinkedRefused = "";
+  try {
+    await customsStore.mark({ partyId: amberParty, status: "linked" });
+  } catch (error) {
+    markLinkedRefused = error.message;
+  }
+  check("không dùng hàm đánh dấu để nối tắt", markLinkedRefused.includes("review"), markLinkedRefused);
 
   check(
     "xác minh và kiểm mailbox không tạo thêm dòng nào",

@@ -19,7 +19,9 @@ import {
 } from "lucide-react";
 
 import { WorkspaceShell } from "@/components/workspace-shell";
+import { CustomsHistory, CustomsQueuePanel } from "@/components/customs-blocks";
 import { filterBuyerList, type BuyerContactRow, type BuyerListRow, type BuyerRegistryRow } from "@/lib/data/buyer-view";
+import type { CustomsQueueItem } from "@/lib/customs/view";
 import type { AppLocale } from "@/lib/i18n";
 
 /**
@@ -124,11 +126,14 @@ export function BuyersPage({
   locale,
   buyers,
   contacts,
+  queue = [],
   live,
 }: {
   locale: AppLocale;
   buyers: BuyerListRow[];
   contacts: BuyerContactRow[];
+  /** Hàng đợi Resolve của hải quan (012) — rỗng khi chưa có tờ khai nào. */
+  queue?: CustomsQueueItem[];
   live: boolean;
 }) {
   const isVietnamese = locale === "vi";
@@ -218,6 +223,8 @@ export function BuyersPage({
           </div>
         ) : null}
 
+        <CustomsQueuePanel queue={queue} buyers={buyers} isVietnamese={isVietnamese} live={live} />
+
         <section className="rounded-[21px] border border-[#EAECF1] bg-white p-4 shadow-[0_8px_28px_rgba(31,38,56,0.025)] sm:p-5">
           <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="relative max-w-[380px] flex-1">
@@ -306,6 +313,7 @@ export function BuyersPage({
                         <tr>
                           <td colSpan={5} className="border-b border-[#F0F1F4] bg-[#FCFCFE] px-3 py-3">
                             {buyer.registry ? <RegistryMatch registry={buyer.registry} isVietnamese={isVietnamese} /> : null}
+                            {buyer.customs ? <CustomsHistory customs={buyer.customs} isVietnamese={isVietnamese} /> : null}
                             {rows.length === 0 ? (
                               <p className="text-[11px] text-[#8B90A0]">
                                 {isVietnamese ? "Chưa có kênh nào qua được kiểm tra cho công ty này." : "No channel for this company has passed the check yet."}

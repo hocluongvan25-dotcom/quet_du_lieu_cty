@@ -94,6 +94,7 @@ async function main() {
   await mkdir(workDir, { recursive: true });
   const entry = `
 export * from "@/lib/data/buyer-view";
+export { toBuyerCustomsByBuyer } from "@/lib/customs/view";
 `;
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
   const bundlePath = path.join(workDir, "bundle.mjs");
@@ -284,6 +285,36 @@ export * from "@/lib/data/buyer-view";
   check("chưa tra sổ thì danh sách không có khối đó, không lỗi", mappedWithoutRegistry.buyers[0].registry === null);
   const registryCsv = api.buildBuyerCsv(mappedWithRegistry);
   check("CSV giữ nguyên 15 cột, không thêm dữ liệu sổ đăng ký", registryCsv.split("\r\n")[0].split(",").length === 15 && !registryCsv.includes("99999999"));
+
+  // Lịch sử nhập khẩu (012) đi kèm khách hàng, nhưng không lọt vào CSV.
+  const customsMap = api.toBuyerCustomsByBuyer(
+    [
+      {
+        buyer_profile_id: "bp-1",
+        records_count: 2,
+        first_shipment: "2026-02-18",
+        last_shipment: "2026-06-30",
+        hs_codes: ["090240", "210690"],
+        product_samples: ["Black tea, fermented"],
+        supplier_countries: ["Sri Lanka (LK)"],
+        supplier_names: ["HARVEST LANKA EXPORTS (PVT) LTD"],
+        source_labels: ["Hải quan — vận đơn công bố"],
+        match_methods: ["exact_name_country"],
+        last_decided_at: "2026-10-04T10:05:00Z",
+      },
+    ],
+    [{ buyer_profile_id: "bp-1", role: "importer", side: "importer_side", records_count: 2, last_shipment: "2026-06-30" }],
+  );
+  const mappedWithCustoms = api.toBuyerList(summary, contactRows, new Map([["bp-1", 2]]), new Map(), new Map(), customsMap);
+  check("lịch sử nhập khẩu theo đúng buyer", mappedWithCustoms.buyers[0].customs?.recordsCount === 2 && mappedWithCustoms.buyers[0].customs?.roles.length === 1);
+  const mappedWithoutCustoms = api.toBuyerList(summary, contactRows, new Map([["bp-1", 2]]));
+  check("chưa nối tờ khai nào thì không có khối hải quan", mappedWithoutCustoms.buyers[0].customs === null);
+  const customsCsv = api.buildBuyerCsv(mappedWithCustoms);
+  check(
+    "CSV vẫn đúng 15 cột, không mang theo dữ liệu hải quan",
+    customsCsv.split("\r\n")[0].split(",").length === 15 && !customsCsv.includes("HARVEST LANKA") && !customsCsv.includes("090240"),
+  );
+  check("khối hải quan không sinh kênh liên hệ nào", mappedWithCustoms.contacts.length === mapped.contacts.length);
 
   const mappedCsv = api.buildBuyerCsv(mapped);
   check("CSV từ dữ liệu thật có nguồn", mappedCsv.includes("https://greatlakespackaging.example/contact"));

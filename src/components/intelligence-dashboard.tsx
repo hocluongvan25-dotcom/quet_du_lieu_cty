@@ -44,6 +44,7 @@ import { LanguageSwitcher } from "@/components/language-switcher";
 import { SignOutButton } from "@/components/sign-out-button";
 import { WorkspaceNotice } from "@/components/workspace-notice";
 import { PeoplePanel, RequirementsPanel } from "@/components/contact-intel";
+import { CustomsHistory } from "@/components/customs-blocks";
 import { buildReportSections } from "@/lib/report-sections";
 import { DEMO_CREDITS, REPORT_COST, type WorkspaceSnapshot } from "@/lib/data/workspace-types";
 import { getCopy, normalizeLocale, type AppLocale } from "@/lib/i18n";
@@ -660,6 +661,12 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
             <p className="mt-3 text-[11px] leading-5 text-[#757B8A]">{report.description}</p>
             <div className="mt-3 flex flex-wrap gap-1.5">{report.signals.map((signal) => <span key={signal} className="rounded-full bg-[#F4F5F8] px-2 py-1 text-[10px] font-semibold text-[#6C7280]">{signal}</span>)}</div>
           </div>
+
+          {report.customs ? (
+            <section className="mt-5">
+              <CustomsHistory customs={report.customs} isVietnamese={locale === "vi"} />
+            </section>
+          ) : null}
 
           {people.length > 0 ? <PeoplePanel locale={locale} people={people} onCopy={onCopy} /> : null}
 
