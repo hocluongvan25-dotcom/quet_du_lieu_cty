@@ -115,6 +115,7 @@ export const runConnectorFn = runConnector;
           searchApiKey: env.SEARCH_API_KEY,
           searchProvider: env.SEARCH_PROVIDER,
           companiesHouseApiKey: env.COMPANIES_HOUSE_API_KEY,
+          secUserAgent: env.SEC_USER_AGENT,
         }
       : false,
     log: args.json ? () => {} : (message) => console.error(`· ${message}`),

@@ -65,6 +65,8 @@ export type SecondaryOptions = {
   searchProvider?: SearchProvider;
   /** Khoá UK Companies House. Không có thì không tra được sổ Anh. */
   companiesHouseApiKey?: string;
+  /** User-Agent cho SEC EDGAR — nên kèm email liên hệ (SEC chặn 403 nếu thiếu). */
+  secUserAgent?: string;
   /** Trần số trang đọc thêm ở bước 3. */
   maxUrls?: number;
 };
@@ -97,6 +99,35 @@ const DEFAULT_SECONDARY_DOCUMENTS = 2;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Biểu mẫu liên hệ là thuộc tính của **cả website**, không phải của từng trang.
+ *
+ * Một biểu mẫu ở chân trang xuất hiện trên mọi trang đã đọc: lần chạy thật trên
+ * mariani.com cho ra **12 dòng "Biểu mẫu liên hệ"** giống hệt nhau, che mất những
+ * kênh thật sự khác. Giữ lại **một** cửa vào — trang sát việc mua bán nhất —
+ * và nói ra số trang đã gộp, để việc gộp không phải là giấu thông tin.
+ */
+export function collapseFormChannels(channels: FoundChannel[]): { channels: FoundChannel[]; collapsed: number } {
+  const forms = channels.filter((channel) => channel.type === "form");
+  if (forms.length <= 1) return { channels, collapsed: 0 };
+
+  const rank = (url: string) => {
+    if (/(sourcing|supplier|vendor|procure|purchas|nguon-hang|mua-hang)/i.test(url)) return 0;
+    if (/(contact|enquir|inquiry|lien-he)/i.test(url)) return 1;
+    if (/(b2b|partnership|partner|about|company)/i.test(url)) return 2;
+    try {
+      if (new URL(url).pathname === "/") return 3;
+    } catch {
+      // URL lạ thì coi như trang thường.
+    }
+    return 4;
+  };
+
+  const best = [...forms].sort((a, b) => rank(a.value) - rank(b.value) || a.value.length - b.value.length)[0];
+  const kept = channels.filter((channel) => channel.type !== "form" || channel === best);
+  return { channels: kept, collapsed: forms.length - 1 };
 }
 
 export async function runConnector(seedInput: string, options: RunConnectorOptions = {}): Promise<ConnectorResult> {
@@ -245,6 +276,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
   if (secondaryEnabled && runReason) {
     const searchApiKey = secondaryOptions.searchApiKey ?? process.env.SEARCH_API_KEY;
     const companiesHouseApiKey = secondaryOptions.companiesHouseApiKey ?? process.env.COMPANIES_HOUSE_API_KEY;
+    const secUserAgent = secondaryOptions.secUserAgent ?? process.env.SEC_USER_AGENT;
     const maxExtra = secondaryOptions.maxUrls ?? DEFAULT_SECONDARY_URLS;
     let extraUrls: string[] = [];
     let extraDocuments: string[] = [];
@@ -272,7 +304,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
 
     // (2) Sổ đăng ký doanh nghiệp — đối chiếu pháp nhân, không tạo kênh liên hệ.
     if (options.companyName?.trim()) {
-      const registryOutcome = await lookupRegistry(country, options.companyName.trim(), { companiesHouseApiKey, fetchImpl: options.fetchImpl, log });
+      const registryOutcome = await lookupRegistry(country, options.companyName.trim(), { companiesHouseApiKey, secUserAgent, fetchImpl: options.fetchImpl, log });
       secondaryReport.registriesQueried = registryOutcome.queried;
       if (registryOutcome.finding) registry = registryOutcome.finding;
       else secondaryReport.registryReason = registryOutcome.reason;
@@ -336,6 +368,13 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
   };
   const stillMissing = (family: TargetFamily) =>
     targets.includes(family) && !channels.some((channel) => channel.type === channelTypeOf[family]);
+
+  const formMerge = collapseFormChannels(channels);
+  if (formMerge.collapsed > 0) {
+    channels.length = 0;
+    channels.push(...formMerge.channels);
+    log(`biểu mẫu liên hệ: gộp ${formMerge.collapsed + 1} trang thành 1 cửa vào (giữ trang sát việc mua bán nhất)`);
+  }
 
   const dedupedNotes: ConnectorNote[] = [];
   const noteKeys = new Set<string>();

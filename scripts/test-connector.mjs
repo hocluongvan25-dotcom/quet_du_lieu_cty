@@ -88,7 +88,7 @@ async function main() {
   };
 
   const entry = `
-import { runConnector } from "@/lib/connector/index";
+import { runConnector, collapseFormChannels } from "@/lib/connector/index";
 import { extractFromPage } from "@/lib/connector/extract";
 import { normalizeSeed, collectCandidateLinks } from "@/lib/connector/discover";
 import { parseRobots, isPathAllowed } from "@/lib/connector/robots";
@@ -103,7 +103,7 @@ import { coverageOf, secondaryReason } from "@/lib/connector/gate";
 import { searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry } from "@/lib/connector/secondary";
 import { buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck } from "@/lib/connector/whatsapp";
 
-export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, lookupSecEdgar, lookupRegistry, registriesForCountry };
+export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, collapseFormChannels, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, lookupSecEdgar, lookupRegistry, registriesForCountry };
 `;
   await mkdir(workDir, { recursive: true });
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
@@ -454,6 +454,117 @@ async function runChecks(api, files) {
   check("người ngoài nhóm mua hàng không tính là đủ", salesPersonOnly.enough === false && salesPersonOnly.named === 1);
   const thinReason = api.secondaryReason(api.coverageOf([]));
   check("không có kênh nào thì lý do nói rõ", String(thinReason).includes("không tìm được kênh nào"), thinReason);
+
+
+  section("điện thoại: nhãn phải nằm ngay trước số (bài học mariani.com)");
+  const arbitrationLine =
+    "Either party may initiate arbitration by providing written notice to the other party. The arbitration will be conducted by the American Arbitration Association (AAA) under its rules, including the AAA's Supplementary Procedures for Consumer Related Disputes; the AAA Rules are available by calling the AAA at 1-800-778-7879.";
+  const arbitration = api.extractFromLines({
+    url: "https://mariani.com/pages/shop-terms",
+    lines: [arbitrationLine],
+    kind: "html",
+    html: "<p>" + arbitrationLine + "</p>",
+  });
+  check(
+    "số của bên thứ ba giữa câu văn dài KHÔNG thành số của công ty",
+    !arbitration.channels.some((channel) => channel.type === "phone"),
+    arbitration.channels.filter((channel) => channel.type === "phone").map((channel) => channel.value).join(", "),
+  );
+  check(
+    "và việc loại trừ được nói ra, kèm lý do",
+    arbitration.notes.some(
+      (note) => note.kind === "excluded" && note.label.includes("18007787879") && note.detail.includes("bên thứ ba"),
+    ),
+    JSON.stringify(arbitration.notes.map((note) => `${note.kind}:${note.label}`)),
+  );
+
+  const labeled = api.extractFromLines({
+    url: "https://mariani.com/pages/contact-us",
+    lines: ["Phone: 989-514-1459", "Fax: 707.452.2973", "+84 28 3822 1234 — trụ sở khu vực"],
+    kind: "html",
+    html: "<p>Phone: 989-514-1459</p><p>Fax: 707.452.2973</p><p>+84 28 3822 1234 — trụ sở khu vực</p>",
+    country: "United States",
+  });
+  const labeledPhones = labeled.channels.filter((channel) => channel.type === "phone");
+  check(
+    "số có nhãn ngay trước vẫn nhận, fax vẫn tách riêng",
+    labeledPhones.length === 3 && labeledPhones.some((channel) => channel.label === "Fax công bố"),
+    labeledPhones.map((channel) => `${channel.label}:${channel.value}`).join(", "),
+  );
+  check(
+    "số quốc tế trong dòng dài không có nhãn vẫn nhận (đã có + thì không cần nhãn)",
+    labeledPhones.some((channel) => channel.value === "+842838221234"),
+    labeledPhones.map((channel) => channel.value).join(", "),
+  );
+
+  section("biểu mẫu liên hệ: một website là một cửa vào, không phải mười hai");
+  const formOf = (url) => ({
+    type: "form",
+    value: url,
+    label: "Biểu mẫu liên hệ trên website",
+    identityMatch: "company_general",
+    certainty: "confirmed",
+    policy: "manual_contact_only",
+    sourceUrl: url,
+    evidenceSnippet: "Contact Us",
+  });
+  const emailChannel = { ...formOf("https://mariani.com/pages/contact-us"), type: "email", value: "productinfo@mariani.com" };
+  const manyForms = [
+    emailChannel,
+    formOf("https://mariani.com/pages/contact-us"),
+    formOf("https://mariani.com/"),
+    formOf("https://mariani.com/products/mango"),
+    formOf("https://mariani.com/blogs/mariani-blog/all-about-prunes"),
+    formOf("https://mariani.com/pages/b2b-partnership"),
+    formOf("https://mariani.com/pages/harvest-and-product-sourcing"),
+    formOf("https://mariani.com/pages/shop-terms-and-conditions-of-use"),
+  ];
+  const merged = api.collapseFormChannels(manyForms);
+  check(
+    "7 biểu mẫu gộp còn 1, và đếm đúng số đã gộp",
+    merged.channels.filter((channel) => channel.type === "form").length === 1 && merged.collapsed === 6,
+    `giữ ${merged.channels.filter((c) => c.type === "form").length}, gộp ${merged.collapsed}`,
+  );
+  check(
+    "giữ trang sát việc mua bán nhất (nguồn hàng), không giữ trang sản phẩm/blog",
+    merged.channels.find((channel) => channel.type === "form").value === "https://mariani.com/pages/harvest-and-product-sourcing",
+    merged.channels.find((channel) => channel.type === "form").value,
+  );
+  check("kênh khác không bị đụng tới", merged.channels.some((channel) => channel.value === "productinfo@mariani.com"));
+  check("một biểu mẫu thì không gộp gì", api.collapseFormChannels([emailChannel, formOf("https://x.example/contact")]).collapsed === 0);
+  check("không có biểu mẫu nào thì trả nguyên danh sách", api.collapseFormChannels([emailChannel]).channels.length === 1);
+
+  section("SEC EDGAR: User-Agent phải kèm cách liên hệ");
+  const secCalls = [];
+  const secStub = (status = 200) => async (url, init = {}) => {
+    secCalls.push({ url: String(url), headers: init.headers ?? {} });
+    return {
+      ok: status === 200,
+      status,
+      url: String(url),
+      headers: { get: () => "application/json" },
+      text: async () => (status === 200 ? "<feed></feed>" : "Forbidden"),
+      json: async () => ({}),
+    };
+  };
+  await api.lookupSecEdgar("Mariani Packing Co.", { fetchImpl: secStub(403) });
+  check(
+    "UA mặc định vẫn gửi, và nói rõ cần đặt SEC_USER_AGENT",
+    String(secCalls[0].headers["user-agent"]).includes("SEC_USER_AGENT"),
+    secCalls[0].headers["user-agent"],
+  );
+  const secForbidden = await api.lookupSecEdgar("Mariani Packing Co.", { fetchImpl: secStub(403) });
+  check(
+    "403 được giải thích, không chỉ báo mã lỗi",
+    secForbidden.reason.includes("403") && secForbidden.reason.includes("SEC_USER_AGENT"),
+    secForbidden.reason,
+  );
+  await api.lookupSecEdgar("Mariani Packing Co.", { fetchImpl: secStub(200), secUserAgent: "Nguyen Van A <a@congty.vn>" });
+  check(
+    "đặt SEC_USER_AGENT thì header dùng đúng chuỗi đó",
+    secCalls[secCalls.length - 1].headers["user-agent"] === "Nguyen Van A <a@congty.vn>",
+    String(secCalls[secCalls.length - 1].headers["user-agent"]),
+  );
 
   section("search API: chỉ để tìm URL trong chính tên miền");
   const searchCalls = [];

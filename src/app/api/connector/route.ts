@@ -138,6 +138,7 @@ export async function POST(request: Request) {
         searchApiKey: process.env.SEARCH_API_KEY,
         searchProvider: process.env.SEARCH_PROVIDER as "serper" | "tavily" | "brave" | undefined,
         companiesHouseApiKey: process.env.COMPANIES_HOUSE_API_KEY,
+        secUserAgent: process.env.SEC_USER_AGENT,
       },
     });
 

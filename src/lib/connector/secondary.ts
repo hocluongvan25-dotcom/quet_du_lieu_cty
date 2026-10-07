@@ -305,6 +305,8 @@ export type RegistryResult = {
 
 export type RegistryKeys = {
   companiesHouseApiKey?: string;
+  /** Chuỗi User-Agent cho SEC EDGAR, nên kèm email liên hệ (chính sách fair-access). */
+  secUserAgent?: string;
   fetchImpl?: typeof fetch;
   log?: (message: string) => void;
 };
@@ -319,11 +321,27 @@ export function registriesForCountry(country?: string | null): ("companies_house
   return [];
 }
 
-const SEC_HEADERS = {
-  // SEC yêu cầu User-Agent nhận diện được, kèm cách liên hệ.
-  "user-agent": "SeekoraBot/0.1 (public supplier research; +https://github.com/hocluongvan25-dotcom/quet_du_lieu_cty)",
-  accept: "application/json",
-};
+/**
+ * SEC chặn (HTTP 403) mọi request thiếu User-Agent nhận diện được — và chính sách
+ * fair-access của họ còn đòi **một cách liên hệ**, thường là email. Request đầu
+ * tiên trên mariani.com đã nhận 403 vì User-Agent chỉ có tên bot và URL.
+ *
+ * Không bịa email: người dùng đặt `SEC_USER_AGENT`, ví dụ
+ * `Nguyen Van A <a@congty.vn>`. Chưa đặt thì vẫn gửi UA nói rõ điều đó, và lỗi
+ * 403 sẽ tự chỉ ra việc cần làm.
+ */
+function secHeaders(contact?: string): Record<string, string> {
+  const agent =
+    (contact ?? "").trim() ||
+    "SeekoraBot/0.1 (public supplier research; đặt SEC_USER_AGENT kèm email liên hệ)";
+  return { "user-agent": agent, accept: "application/json" };
+}
+
+function secForbiddenHint(status: number): string {
+  return status === 403
+    ? " — SEC đòi User-Agent kèm cách liên hệ, đặt SEC_USER_AGENT trong .env.local (ví dụ: \"Tên anh <email@congty.vn>\")"
+    : "";
+}
 
 export const COMPANIES_HOUSE_LABEL = "UK Companies House";
 export const SEC_EDGAR_LABEL = "US SEC EDGAR";
@@ -409,20 +427,25 @@ export async function lookupCompaniesHouse(companyName: string, keys: RegistryKe
 export async function lookupSecEdgar(companyName: string, keys: RegistryKeys = {}): Promise<RegistryResult> {
   const log = keys.log ?? (() => {});
   const fetchImpl = keys.fetchImpl ?? fetch;
+  const headers = secHeaders(keys.secUserAgent);
 
   try {
     const searchResponse = await fetchImpl(
       `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=${encodeURIComponent(companyName)}&type=10-K&dateb=&owner=include&count=10&output=atom`,
-      { headers: SEC_HEADERS },
+      { headers },
     );
-    if (!searchResponse.ok) return { queried: ["sec_edgar"], reason: `SEC trả HTTP ${searchResponse.status}` };
+    if (!searchResponse.ok) {
+      return { queried: ["sec_edgar"], reason: `SEC trả HTTP ${searchResponse.status}${secForbiddenHint(searchResponse.status)}` };
+    }
 
     const xml = await searchResponse.text();
     const cik = [...xml.matchAll(/CIK=(\d{10})/g)].map((match) => match[1])[0];
     if (!cik) return { queried: ["sec_edgar"], reason: "không tìm thấy hồ sơ theo tên này" };
 
-    const detailResponse = await fetchImpl(`https://data.sec.gov/submissions/CIK${cik}.json`, { headers: SEC_HEADERS });
-    if (!detailResponse.ok) return { queried: ["sec_edgar"], reason: `SEC submissions trả HTTP ${detailResponse.status}` };
+    const detailResponse = await fetchImpl(`https://data.sec.gov/submissions/CIK${cik}.json`, { headers });
+    if (!detailResponse.ok) {
+      return { queried: ["sec_edgar"], reason: `SEC submissions trả HTTP ${detailResponse.status}${secForbiddenHint(detailResponse.status)}` };
+    }
 
     const detail = (await detailResponse.json()) as {
       name?: string;

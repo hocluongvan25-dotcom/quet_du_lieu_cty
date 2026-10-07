@@ -247,9 +247,12 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
 
   // ---------------------------------------------------------------- phones ---
   const phoneMatches: { value: string; line: number; raw: string }[] = [];
+  const PHONE_CONTEXT_RE = /phone|tel|call|điện thoại|hotline|fax|contact|liên hệ|\+\d/i;
+  const PHONE_LABEL_BEFORE_RE = /(phone|tel|telephone|call|hotline|mobile|fax|điện thoại|liên hệ|contact)\s*[:：.\-–/]?\s*$/i;
+
   lines.forEach((line, lineIndex) => {
     // Số điện thoại phải xuất hiện ở dòng có dấu hiệu liên hệ, để không bắt nhầm mã số.
-    const hasContext = /phone|tel|call|điện thoại|hotline|fax|contact|liên hệ|\+\d/i.test(line);
+    const hasContext = PHONE_CONTEXT_RE.test(line);
     const found = line.match(PHONE_RE) ?? [];
     found.forEach((raw) => {
       const digits = digitCount(raw);
@@ -258,6 +261,28 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
       if (!hasContext && !explicitCountry) return;
       // Mã số, mã đơn hàng, mã số thuế: chuỗi số thuần không phân cách, không phải điện thoại.
       if (!explicitCountry && !/[\s().\-]/.test(raw)) return;
+
+      // Có từ khoá liên hệ ở đâu đó trong câu là **chưa đủ**: câu điều khoản trọng
+      // tài có đoạn "… by calling the AAA at 1-800-778-7879 …" — chữ "calling"
+      // làm số tổng đài của American Arbitration Association lọt vào và bị ghi
+      // thành số của công ty. Vì vậy nhãn phải nằm NGAY TRƯỚC số, hoặc cả dòng
+      // phải là một dòng liên hệ ngắn (chân trang, khối liên hệ), chứ không phải
+      // một đoạn văn.
+      const matchIndex = line.indexOf(raw);
+      const prefix = (matchIndex === -1 ? line : line.slice(0, matchIndex)).trimEnd();
+      const labelBefore = PHONE_LABEL_BEFORE_RE.test(prefix);
+      const shortLine = line.trim().length <= 80;
+      if (!explicitCountry && !labelBefore && !shortLine) {
+        notes.push({
+          kind: "excluded",
+          label: normalizePhone(raw) ?? raw,
+          detail:
+            "Số nằm giữa một câu văn dài và không có nhãn điện thoại ngay trước nó — dễ là số của bên thứ ba (đơn vị trọng tài, tổng đài dịch vụ, ngân hàng) nên không ghi thành liên hệ của công ty.",
+          sourceUrl: url,
+        });
+        return;
+      }
+
       const value = normalizePhone(raw);
       if (!value) return;
       phoneMatches.push({ value, line: lineIndex, raw });

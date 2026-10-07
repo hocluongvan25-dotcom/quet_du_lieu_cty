@@ -602,13 +602,27 @@ Một số muốn vừa giữ app vừa cắm Cloud API thì Meta có **Coexiste
 
 `npm run whatsapp:check` là đường kiểm: **không gửi tin nhắn nào**, chỉ hỏi tài khoản đang gọi là số nào rồi hỏi Meta các số được đưa vào. Kết quả đọc theo đúng ba trạng thái của `has_whatsapp`. Chưa có thông tin đăng nhập thì lệnh in ra các bước lấy rồi thoát 0 — thiếu phần này là trạng thái bình thường.
 
+### Ba bài học từ lần chạy thật đầu tiên (07/10/2026, mariani.com)
+
+Lần chạy thật đầu tiên bằng khoá Tavily đã lộ ra ba lỗi mà không bài test nào bắt được, vì cả ba đều cần dữ liệu thật của một website thật.
+
+**1. Số điện thoại của bên thứ ba bị ghi thành số của công ty.** Trang điều khoản có câu "…the AAA Rules are available by calling the AAA at 1-800-778-7879…". Luật cũ chỉ đòi *một từ khoá liên hệ ở đâu đó trong dòng* — chữ "calling" đủ để số tổng đài của American Arbitration Association thành "Điện thoại công bố" của Mariani, kèm mức tin cậy **đã thấy công bố** và chính sách **dùng được**.
+
+Luật mới: nhãn phải nằm **ngay trước** số (`Phone:`, `Fax`, `Hotline:`…), **hoặc** cả dòng phải là một dòng liên hệ ngắn (chân trang, khối liên hệ). Số đã có `+`/`00` thì vẫn nhận mà không cần nhãn — dạng đó tự nó đã nói rõ là số quốc tế. Số bị loại vì nằm giữa câu văn dài thì **được ghi vào "đã loại trừ" kèm lý do**, không biến mất im lặng.
+
+**2. Biểu mẫu liên hệ nhân lên theo số trang.** Một biểu mẫu ở chân trang xuất hiện trên 12 trang đã đọc → 12 dòng "Biểu mẫu liên hệ trên website" giống hệt nhau, che mất những kênh thật sự khác. Biểu mẫu là thuộc tính của **website**, không phải của từng trang: `collapseFormChannels` giữ **một** cửa vào — trang sát việc mua bán nhất (nguồn hàng/mua hàng → liên hệ → giới thiệu) — và log của lần chạy nói ra số trang đã gộp.
+
+**3. SEC EDGAR trả 403 vì User-Agent thiếu cách liên hệ.** Chính sách fair-access của SEC đòi header nhận diện được **kèm cách liên hệ**; User-Agent cũ chỉ có tên bot và URL nên bị chặn. Giờ `SEC_USER_AGENT` (ví dụ `Tên anh <email@congty.vn>`) đi từ `.env.local` xuyên qua API tới tận request, và thông báo lỗi 403 tự nói ra việc cần làm thay vì chỉ "SEC trả HTTP 403". Không bịa email liên hệ.
+
+Điểm chung của cả ba: **một lần chạy xanh không chứng minh dữ liệu đúng** — nó chỉ chứng minh không có lỗi nào bị ném ra. Ba lỗi này đều là "dữ liệu sai nhưng trông hợp lệ", đúng loại lỗi mà các cổng và nhãn tin cậy sinh ra để chặn.
+
 ### Nút WhatsApp trên UI
 
 `public.contact_whatsapp_links` (008) chỉ trả những số **đã kiểm là có WhatsApp**, kèm `whatsapp_url = 'https://wa.me/' || <số không dấu +>`. Danh sách buyer đọc view này và hiện nút "Nhắn WhatsApp"; số chưa kiểm thì không có nút, không có suy đoán. View rỗng khi chưa cắm dịch vụ kiểm — và đó là trạng thái đúng.
 
 ### Kiểm chứng
 
-- `npm run connector:test` — 211 check ở vòng 012 (120 ở vòng này), thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
+- `npm run connector:test` — 223 check ở vòng 012 (120 ở vòng này), thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
 - `npm run persist:test` — 63 check: E.164 được lưu đúng, `has_whatsapp` là `null` sau khi connector ghi, view WhatsApp trống khi chưa kiểm, rồi mô phỏng kết quả kiểm → view trả `https://wa.me/17074522800`, và hai ràng buộc mới bị database từ chối thi hành.
 
 ---
@@ -763,7 +777,7 @@ Gói miễn phí để bắt đầu, theo công bố của chính các nhà cung
 | Sổ | Quốc gia | Lấy được | Điều kiện |
 | --- | --- | --- | --- |
 | UK Companies House | Anh | tên pháp nhân, số đăng ký, tình trạng, ngày thành lập, mã SIC, tên cũ, **người đương nhiệm** | API miễn phí; dữ liệu mở theo OGL, được dùng thương mại **khi ghi nguồn** (nhãn nguồn luôn được ghi) |
-| US SEC EDGAR | Mỹ | tên pháp nhân, mã CIK, ngành theo SIC, tên cũ, hồ sơ gần nhất | hồ sơ công khai; phải gửi User-Agent nhận diện được |
+| US SEC EDGAR | Mỹ | tên pháp nhân, mã CIK, ngành theo SIC, tên cũ, hồ sơ gần nhất | hồ sơ công khai; **bắt buộc User-Agent kèm cách liên hệ** — thiếu thì 403 (xem ghi chú dưới) |
 
 Hai điều cố ý:
 
@@ -786,7 +800,7 @@ Với `SEARCH_API_KEY` / `SEARCH_PROVIDER` / `COMPANIES_HOUSE_API_KEY` đặt tr
 
 ### Kiểm chứng
 
-`npm run connector:test` — **211 check** ở vòng 012 (182 ở vòng này, 120 trước đó): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá, hình dạng request/kết quả của cả ba nhà cung cấp, kết quả hỏng bị bỏ), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
+`npm run connector:test` — **223 check** ở vòng 012 (182 ở vòng này, 120 trước đó): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá, hình dạng request/kết quả của cả ba nhà cung cấp, kết quả hỏng bị bỏ), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
 
 ### Kèm theo: `info@` không còn bị xếp là email bộ phận
 

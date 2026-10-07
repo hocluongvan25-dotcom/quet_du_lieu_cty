@@ -256,7 +256,7 @@ npm run connector:run acmespices.co.uk -- --no-secondary   # company site only
 | Piece | Role |
 | --- | --- |
 | `html.ts` | HTML to lines, entity decoding, registrable-domain helper |
-| `extract.ts` | Emails, phones, social/WhatsApp links, forms, adjacent person names, excluded third-party values |
+| `extract.ts` | Emails, phones (a label must sit **immediately before** the number, or the line must be a short contact line — an arbitration clause saying "by calling the AAA at 1-800-778-7879" must not become the company's phone), social/WhatsApp links, forms, adjacent person names, excluded third-party values |
 | `robots.ts` | robots.txt parsing and longest-match Allow/Disallow |
 | `fetch.ts` | One page fetch with timeout, size cap, login-wall and block detection |
 | `safety.ts` | SSRF guard: loopback, private ranges, link-local/metadata IPs, `.internal`, non-http schemes |
@@ -269,7 +269,7 @@ npm run connector:run acmespices.co.uk -- --no-secondary   # company site only
 | `persist.ts` | Builds the database rows (pure) and writes them through a small store port: `buyer_profiles`, `decision_makers`, `contact_channels`, `buyer_routes` |
 
 ```bash
-npm run connector:test    # 211 checks on real HTML and PDF fixtures, no network needed
+npm run connector:test    # 223 checks on real HTML and PDF fixtures, no network needed
 npm run connector:run mariani.com            # real run, human readable
 npm run connector:run mariani.com -- --json  # full JSON
 ```
@@ -280,7 +280,7 @@ npm run connector:run mariani.com -- --json  # full JSON
 | --- | --- | --- |
 | Search API (Serper / Tavily / Brave) | `SEARCH_API_KEY`, `SEARCH_PROVIDER` (optional for Tavily — a `tvly-` key is recognised on its own) | **URLs inside the company domain** (`site:` is always in the query, plus Tavily's own `include_domains` because Tavily does not honour `site:`). Search snippets are never evidence; the page is fetched and quoted as usual. Off-domain hits are dropped twice. Google's and Microsoft's own search APIs are no longer an option: Bing Search was retired on 11/08/2025 and Google's Custom Search JSON API is closed to new customers and ends 01/01/2027 — hence the three providers above. |
 | UK Companies House | `COMPANIES_HOUSE_API_KEY` | Legal name, company number, status, incorporation date, SIC code, former names, current officers — entity confirmation for step 1. **The register has no email or phone, so it never creates a channel.** Open Government Licence; source label always written. |
-| US SEC EDGAR | none | Legal name, CIK, SIC industry, former names, latest filing. EDGAR does not list officers (that lives inside each filing), so no names are guessed. |
+| US SEC EDGAR | `SEC_USER_AGENT` (optional — SEC wants a User-Agent with a contact, e.g. `Your Name <you@example.com>`; without one EDGAR answers 403) | Legal name, CIK, SIC industry, former names, latest filing. EDGAR does not list officers (that lives inside each filing), so no names are guessed. |
 
 Countries without a free register (Vietnam included) get an explicit "no register available for this country" reason rather than a substitute source. `--no-secondary`, or `secondary: false` over HTTP, disables the step entirely. Every command that reads those keys — `connector:run`, `search:check`, `reverify:run`, `retention:run` — reads `.env.local` first and the shell environment second, so a key pasted into `.env.local` is actually used rather than silently skipped; `connector:run` prints which source it took the key from and warns when step 3 has no key at all.
 
@@ -309,6 +309,8 @@ Migration 007 makes evidence a column-level rule rather than a convention: a `co
 `country` is required and is never inferred from the domain suffix: missing it returns `persisted: false` with that reason instead of storing half a row. Writes go through the service role — migrations 005/006 revoke insert/update on the buyer tables from `authenticated`, so the browser cannot write buyer data — and `organization_id` always comes from the session, never from the request body.
 
 Re-running the same domain refreshes `last_seen_at` instead of duplicating channels, people or routes.
+
+Contact forms are a property of the **site**, not of each page: a footer form shows up on every page read, and a real run on mariani.com produced 12 identical "contact form" rows that buried every other channel. `collapseFormChannels` keeps **one** entry — the page closest to buying (sourcing/supplier → contact → about) — and the run log states how many pages were merged, so nothing is hidden.
 
 ### Phone numbers and WhatsApp
 
