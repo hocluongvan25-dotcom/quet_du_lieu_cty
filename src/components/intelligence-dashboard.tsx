@@ -2,35 +2,34 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
+  Phone,
+  MessageCircle,
+  Mail,
+  ExternalLink,
+  BriefcaseBusiness,
   AlertCircle,
   Archive,
   ArrowUpRight,
   Bell,
-  BriefcaseBusiness,
   Check,
   ChevronDown,
   ChevronRight,
   CircleHelp,
-  CircleCheckBig,
   Clock3,
   Copy,
   CreditCard,
   Database,
   Download,
-  ExternalLink,
   FileSearch,
   Globe2,
   History,
   LayoutDashboard,
   Link2,
   LoaderCircle,
-  Mail,
   Menu,
-  MessageCircle,
   MoreHorizontal,
-  Phone,
   Plus,
   Search,
   Settings2,
@@ -42,6 +41,13 @@ import {
 } from "lucide-react";
 import { CompanyReport, Contact, initialReports } from "@/lib/demo-data";
 import { LanguageSwitcher } from "@/components/language-switcher";
+import { SignOutButton } from "@/components/sign-out-button";
+import { WorkspaceNotice } from "@/components/workspace-notice";
+import { PeoplePanel, RequirementsPanel } from "@/components/contact-intel";
+import { CustomsHistory } from "@/components/customs-blocks";
+import { buildReportSections } from "@/lib/report-sections";
+import { DEMO_CREDITS, REPORT_COST, type WorkspaceSnapshot } from "@/lib/data/workspace-types";
+import { RESEARCH_PROVIDER, researchCreditCost } from "@/lib/data/research-provider";
 import { getCopy, normalizeLocale, type AppLocale } from "@/lib/i18n";
 
 type SearchMode = "name" | "link";
@@ -85,10 +91,25 @@ function reportSummaryForClipboard(report: CompanyReport, locale: AppLocale) {
     `${isVietnamese ? "Quốc gia" : "Country"}: ${report.country}`,
     `${isVietnamese ? "Ngành" : "Industry"}: ${report.industry}`,
     `${isVietnamese ? "Độ tin cậy" : "Confidence"}: ${report.confidence}/100`,
+    report.sampleData
+      ? isVietnamese
+        ? "LƯU Ý: đây là báo cáo mẫu — chưa đọc từ nguồn công khai"
+        : "NOTE: this is a sample report — not read from public sources"
+      : "",
     report.website ? `${isVietnamese ? "Website" : "Website"}: ${report.website}` : "",
     "",
     `${isVietnamese ? "KÊNH KINH DOANH ĐÃ XÁC MINH" : "VERIFIED BUSINESS CHANNELS"}:`,
     ...verifiedContacts.map((contact) => `• ${contact.label}: ${contact.value}`),
+    "",
+    ...(report.people?.length
+      ? [
+          "",
+          `${isVietnamese ? "ĐẦU MỐI LIÊN HỆ" : "CONTACTS"}:`,
+          ...report.people.map(
+            (person) => `• ${person.name} — ${person.title} · ${person.channels.map((channel) => channel.value).join(", ")}`,
+          ),
+        ]
+      : []),
     "",
     `${isVietnamese ? "NGUỒN" : "SOURCES"}:`,
     ...report.sources.map((source) => `• ${source.label}: ${source.url}`),
@@ -138,21 +159,31 @@ function StatusPill({ status, locale }: { status: CompanyReport["status"]; local
   return <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFF4E5] px-2.5 py-1 text-[11px] font-semibold text-[#C47A16]"><span className="h-1.5 w-1.5 rounded-full bg-[#E49B31]" /> {labels.review}</span>;
 }
 
-function ContactIcon({ type }: { type: Contact["type"] }) {
-  const className = "text-[#737889]";
-  if (type === "email") return <Mail size={17} className={className} />;
-  if (type === "phone") return <Phone size={17} className={className} />;
-  if (type === "linkedin") return <BriefcaseBusiness size={17} className={className} />;
-  if (type === "whatsapp") return <MessageCircle size={17} className={className} />;
-  return <Globe2 size={17} className={className} />;
-}
 
-export function IntelligenceDashboard() {
+export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnapshot }) {
   const params = useParams<{ locale?: string }>();
   const locale = normalizeLocale(params?.locale);
   const t = getCopy(locale);
   const prefix = `/${locale}`;
-  const [reports, setReports] = useState<CompanyReport[]>(initialReports);
+  const router = useRouter();
+  const isLive = workspace.state === "live" && workspace.account !== null;
+  const account = workspace.account;
+  const displayName = account?.displayName ?? (locale === "vi" ? "bạn" : "there");
+  // The server snapshot is the source of truth; local state only holds what
+  // this session created or spent before the router refresh lands.
+  const [createdReports, setCreatedReports] = useState<CompanyReport[]>([]);
+  const [demoCreditsUsed, setDemoCreditsUsed] = useState(0);
+  const baseReports = isLive ? workspace.reports : initialReports;
+  const baseCredits = account?.credits ?? DEMO_CREDITS;
+  const credits = isLive ? baseCredits : Math.max(0, baseCredits - demoCreditsUsed);
+  // What a research actually costs today. Sample reports are free, so the
+  // price printed on the button must follow the provider, not a constant.
+  const reportCost = researchCreditCost(RESEARCH_PROVIDER, REPORT_COST);
+  const sampleOnly = RESEARCH_PROVIDER === "demo";
+  const reports = useMemo(() => {
+    const known = new Set(baseReports.map((report) => report.id));
+    return [...createdReports.filter((report) => !known.has(report.id)), ...baseReports];
+  }, [baseReports, createdReports]);
   const [mode, setMode] = useState<SearchMode>("name");
   const [companyName, setCompanyName] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -160,12 +191,12 @@ export function IntelligenceDashboard() {
   const [selectedReport, setSelectedReport] = useState<CompanyReport | null>(null);
   const [isResearching, setIsResearching] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [credits, setCredits] = useState(128);
   const [showWallet, setShowWallet] = useState(false);
   const [toast, setToast] = useState("");
   const [formError, setFormError] = useState("");
 
   const readyCount = useMemo(() => reports.filter((report) => report.status === "ready").length, [reports]);
+  const expiringSoon = useMemo(() => reports.filter((report) => report.daysLeft <= 7).length, [reports]);
 
   const notify = (message: string) => {
     setToast(message);
@@ -190,8 +221,8 @@ export function IntelligenceDashboard() {
       return;
     }
 
-    if (credits < 5) {
-      setFormError(t.dashboard.insufficientCredits);
+    if (credits < reportCost) {
+      setFormError(t.dashboard.insufficientCredits.replace("{cost}", String(reportCost)));
       return;
     }
 
@@ -207,6 +238,7 @@ export function IntelligenceDashboard() {
           companyName: mode === "name" ? companyName : "",
           sourceUrl: mode === "link" ? sourceUrl : "",
           country: country === "global" ? "" : country,
+          locale,
         }),
       });
 
@@ -216,19 +248,32 @@ export function IntelligenceDashboard() {
       setProgress(68);
 
       const response = await responsePromise;
-      const result = (await response.json()) as { report?: CompanyReport; error?: string; creditsCharged?: number };
+      const result = (await response.json()) as {
+        report?: CompanyReport;
+        error?: string;
+        creditsCharged?: number;
+        creditsRemaining?: number;
+        dataSource?: string;
+        provider?: string;
+      };
 
       if (!response.ok || !result.report) throw new Error(result.error || "Không thể tạo report lúc này.");
 
       await sleep(450);
       setProgress(91);
       await sleep(350);
-      setReports((current) => [result.report as CompanyReport, ...current]);
-      setCredits((current) => current - (result.creditsCharged || 5));
+      setCreatedReports((current) => [result.report as CompanyReport, ...current]);
       setSelectedReport(result.report);
       setCompanyName("");
       setSourceUrl("");
-      notify(t.dashboard.completed);
+      notify(result.dataSource === "demo" ? t.dashboard.sampleNotice : t.dashboard.completed);
+      if (isLive) {
+        // Re-read the workspace so credits, report ids and evidence are the
+        // stored rows instead of the optimistic client state.
+        router.refresh();
+      } else {
+        setDemoCreditsUsed((current) => current + (result.creditsCharged ?? reportCost));
+      }
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Đã có lỗi xảy ra. Hãy thử lại.");
     } finally {
@@ -277,12 +322,12 @@ export function IntelligenceDashboard() {
         </div>
 
         <div className="mt-4 flex items-center gap-2.5 rounded-xl px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#DFF4F0] text-[11px] font-bold text-[#218A72]">AN</div>
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#DFF4F0] text-[11px] font-bold text-[#218A72]">{account?.initials ?? "AN"}</div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[12px] font-bold text-[#343747]">Anh Nguyen</p>
-            <p className="truncate text-[10px] text-[#8A90A0]">{t.starter}</p>
+            <p className="truncate text-[12px] font-bold text-[#343747]">{account?.displayName ?? (locale === "vi" ? "Khách demo" : "Demo guest")}</p>
+            <p className="truncate text-[10px] text-[#8A90A0]">{account ? `${account.plan} · ${account.organizationName}` : t.starter}</p>
           </div>
-          <ChevronDown size={15} className="text-[#989DAC]" />
+          <SignOutButton variant="icon" />
         </div>
       </aside>
 
@@ -307,6 +352,7 @@ export function IntelligenceDashboard() {
               <CircleHelp size={15} className="mr-1.5" /> {t.help}
             </button>
             <LanguageSwitcher />
+            <SignOutButton />
             <button type="button" className="relative rounded-xl p-2.5 text-[#656B79] transition hover:bg-[#F3F4F7]" onClick={() => notify("Bạn đang không có thông báo mới.")} aria-label="Thông báo">
               <Bell size={19} />
               <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-[#755EF7] ring-2 ring-white" />
@@ -330,7 +376,7 @@ export function IntelligenceDashboard() {
                     </div>
                     <div className="rounded-lg bg-[#F0EEFF] p-2 text-[#6558E8]"><Sparkles size={16} /></div>
                   </div>
-                  <div className="mt-3 rounded-xl bg-[#F8F9FB] px-3 py-2 text-[11px] leading-4 text-[#777D8D]">{locale === "vi" ? "1 Company Report tiêu chuẩn sử dụng 5 credits." : "One standard Company Report uses 5 credits."}</div>
+                  <div className="mt-3 rounded-xl bg-[#F8F9FB] px-3 py-2 text-[11px] leading-4 text-[#777D8D]">{reportCost > 0 ? t.dashboard.costNote.replace("{cost}", String(reportCost)) : t.dashboard.costNoteFree}</div>
                   <button type="button" onClick={() => { setShowWallet(false); notify(locale === "vi" ? "Trang nạp credits sẽ sớm có mặt." : "Credit top-up will be available soon."); }} className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#5E54E8] px-3 py-2.5 text-[12px] font-bold text-white hover:bg-[#5147D9]">
                     <Plus size={14} /> {locale === "vi" ? "Nạp credits" : "Add credits"}
                   </button>
@@ -341,13 +387,21 @@ export function IntelligenceDashboard() {
         </header>
 
         <div className="mx-auto max-w-[1460px] px-5 py-7 sm:px-7 lg:px-9 lg:py-9">
+          <WorkspaceNotice className="mb-5" />
+
           <section className="mb-7 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <div className="mb-2 flex items-center gap-2">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-[#ECEAFF] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-[#6257E7]">{t.dashboard.eyebrow}</span>
-                <span className="text-[11px] font-medium text-[#8B90A0]">{t.dashboard.dataClear}</span>
+                {sampleOnly ? null : <span className="text-[11px] font-medium text-[#8B90A0]">{t.dashboard.dataClear}</span>}
+                <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${isLive ? "bg-[#EAF8F3] text-[#168466]" : "bg-[#F1F2F5] text-[#6C7280]"}`}>
+                  {isLive ? t.dashboard.liveData : t.dashboard.demoFallback}
+                </span>
+                {sampleOnly ? (
+                  <span className="rounded-full bg-[#FFF4E5] px-2.5 py-1 text-[10px] font-bold text-[#C47A16]">{t.dashboard.sampleOnly}</span>
+                ) : null}
               </div>
-              <h1 className="text-[25px] font-bold tracking-[-0.045em] text-[#252837] sm:text-[30px]">{t.dashboard.greeting}</h1>
+              <h1 className="text-[25px] font-bold tracking-[-0.045em] text-[#252837] sm:text-[30px]">{t.dashboard.greeting.replace("{name}", displayName)}</h1>
               <p className="mt-1.5 text-[13px] text-[#747A8A]">{t.dashboard.subtitle}</p>
             </div>
             <button type="button" onClick={() => notify(locale === "vi" ? "Bạn có thể nhập tên công ty hoặc dán một link ở ô bên dưới." : "Enter a company name or paste a public company link below.")} className="inline-flex w-fit items-center gap-2 text-[12px] font-semibold text-[#5C52E8] hover:text-[#4438D4]">
@@ -400,7 +454,11 @@ export function IntelligenceDashboard() {
                 </div>
                 <button disabled={isResearching} type="submit" className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-[#5D53E8] px-5 text-[13px] font-bold text-white shadow-[0_8px_17px_rgba(85,73,218,0.25)] transition hover:bg-[#4E44D7] disabled:cursor-not-allowed disabled:opacity-70">
                   {isResearching ? <LoaderCircle size={17} className="animate-spin" /> : <Sparkles size={16} />}
-                  {isResearching ? t.dashboard.researching : t.dashboard.research}
+                  {isResearching
+                    ? t.dashboard.researching
+                    : reportCost > 0
+                      ? t.dashboard.research.replace("{cost}", String(reportCost))
+                      : t.dashboard.researchFree}
                 </button>
               </form>
               {formError ? <p className="mt-3 flex items-center gap-1.5 text-[11px] font-medium text-[#C45B4D]"><AlertCircle size={13} /> {formError}</p> : <p className="mt-3 flex items-center gap-1.5 text-[11px] text-[#8A90A0]"><ShieldCheck size={13} className="text-[#46A98A]" /> {t.dashboard.publicOnly}</p>}
@@ -436,7 +494,7 @@ export function IntelligenceDashboard() {
                             <Avatar report={report} size="sm" />
                             <span>
                               <span className="block max-w-[220px] truncate text-[12px] font-bold text-[#353947] group-hover:text-[#5E53E8]">{report.companyName}</span>
-                              <span className="mt-0.5 flex items-center gap-1 text-[10px] text-[#9095A3]"><Globe2 size={11} /> {report.country} · {report.createdAt}</span>
+                              <span className="mt-0.5 flex items-center gap-1 text-[10px] text-[#9095A3]"><Globe2 size={11} /> {report.country} · {report.createdAt}{report.sampleData ? <span className="rounded-full bg-[#F1F2F5] px-1.5 py-0.5 text-[9px] font-bold text-[#6C7280]">{t.dashboard.sampleBadge}</span> : null}</span>
                             </span>
                           </button>
                         </td>
@@ -451,6 +509,11 @@ export function IntelligenceDashboard() {
                         <td className="border-b border-[#F0F1F4] py-3.5 pr-2 text-right"><button type="button" onClick={() => setSelectedReport(report)} className="rounded-lg p-1.5 text-[#969CAA] hover:bg-[#EEF0F5] hover:text-[#555C6B]" aria-label={`Mở ${report.companyName}`}><MoreHorizontal size={18} /></button></td>
                       </tr>
                     ))}
+                    {reports.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-10 text-center text-[12px] text-[#8B90A0]">{t.dashboard.emptyReports}</td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>
@@ -469,8 +532,8 @@ export function IntelligenceDashboard() {
                 </div>
                 <p className="mt-3 text-[11px] leading-5 text-[#7A8090]">{t.dashboard.retentionText}</p>
                 <div className="mt-4 border-t border-[#EEF0F4] pt-3.5">
-                  <div className="flex items-center justify-between text-[11px]"><span className="text-[#767C8B]">Report sắp hết hạn</span><span className="font-bold text-[#343847]">02</span></div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#EFF0F5]"><div className="h-full w-[27%] rounded-full bg-[#F2AB46]" /></div>
+                  <div className="flex items-center justify-between text-[11px]"><span className="text-[#767C8B]">{locale === "vi" ? "Report sắp hết hạn" : "Reports expiring soon"}</span><span className="font-bold text-[#343847]">{String(expiringSoon).padStart(2, "0")}</span></div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#EFF0F5]"><div className="h-full rounded-full bg-[#F2AB46]" style={{ width: `${reports.length > 0 ? Math.round((expiringSoon / reports.length) * 100) : 0}%` }} /></div>
                 </div>
                 <Link href={`${prefix}/archive`} className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-xl border border-[#DDD9FF] bg-[#FAF9FF] px-3 py-2.5 text-[11px] font-bold text-[#5D53E8] hover:bg-[#F4F2FF]">
                   <Archive size={14} /> {t.dashboard.archive12}
@@ -481,7 +544,7 @@ export function IntelligenceDashboard() {
                 <div className="flex items-center justify-between"><div className="rounded-xl bg-white/10 p-2.5"><Database size={18} /></div><span className="rounded-full bg-[#9B8CFF]/20 px-2 py-1 text-[10px] font-bold text-[#CDC6FF]">STARTER</span></div>
                 <p className="mt-4 text-[11px] font-medium text-[#C8C5DC]">{t.dashboard.credits}</p>
                 <p className="mt-1 text-[28px] font-bold tracking-[-0.05em]">{credits}<span className="ml-1 text-sm font-semibold text-[#B7B2D4]">{t.common.credits}</span></p>
-                <div className="mt-4 flex items-center justify-between border-t border-white/10 pt-3 text-[10px] text-[#C7C3D9]"><span>{t.dashboard.enoughFor}</span><span className="font-bold text-white">{Math.floor(credits / 5)} {t.dashboard.reports}</span></div>
+                <div className="mt-4 flex items-center justify-between border-t border-white/10 pt-3 text-[10px] text-[#C7C3D9]"><span>{t.dashboard.enoughFor}</span><span className="font-bold text-white">{reportCost > 0 ? `${Math.floor(credits / reportCost)} ${t.dashboard.reports}` : t.dashboard.noCreditSpend}</span></div>
               </section>
             </div>
           </section>
@@ -520,9 +583,59 @@ export function IntelligenceDashboard() {
   );
 }
 
+/**
+ * Where a channel value points. Email addresses and handles have no URL of their
+ * own, so they link to the page they were seen on; a phone number is not a link.
+ */
+function channelHref(contact: Contact): string | null {
+  if (contact.type === "phone" || !contact.value) return null;
+  if (contact.sourceUrl) return contact.sourceUrl;
+  if (/^https?:\/\//i.test(contact.value)) return contact.value;
+  return contact.value.includes(".") ? `https://${contact.value}` : null;
+}
+
+/**
+ * The value as plain content: a link when there is somewhere to go, text when not.
+ * A link carries the link colour at rest — the user should not have to hover to
+ * find out what is clickable — and a phone number stays dark because it is not one.
+ * Callers pass size and layout classes only, never colour.
+ */
+function ChannelValue({ contact, className = "" }: { contact: Contact; className?: string }) {
+  const href = channelHref(contact);
+  if (!href) return <span className={`${className} truncate font-bold text-[#3B3F4F]`}>{contact.value}</span>;
+  return (
+    <a href={href} target="_blank" rel="noreferrer" title={contact.source} className={`${className} truncate font-bold text-[#5D53E8] hover:text-[#4335CB] hover:underline`}>
+      {contact.value}
+    </a>
+  );
+}
+
+/** The channel's own icon (mail / phone / profile / website) — not a status mark. */
+function ContactIcon({ type, size = 14 }: { type: Contact["type"]; size?: number }) {
+  const className = "shrink-0 text-[#737889]";
+  if (type === "email") return <Mail size={size} className={className} />;
+  if (type === "phone") return <Phone size={size} className={className} />;
+  if (type === "linkedin") return <BriefcaseBusiness size={size} className={className} />;
+  if (type === "whatsapp") return <MessageCircle size={size} className={className} />;
+  return <Globe2 size={size} className={className} />;
+}
+
+/** Copy is an action, not a notice — kept wherever a value is shown. */
+function CopyButton({ value, label, title, onCopy }: { value: string; label: string; title: string; onCopy: (value: string, label: string) => void }) {
+  const canCopy = value !== "Chưa xác minh" && value !== "Not verified";
+  return (
+    <button type="button" disabled={!canCopy} onClick={() => onCopy(value, label)} title={title} aria-label={`${title} ${label}`} className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[#6257E7] transition hover:bg-[#F2F0FF] disabled:cursor-not-allowed disabled:opacity-35">
+      <Copy size={12} />
+    </button>
+  );
+}
+
 function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }: { locale: AppLocale; report: CompanyReport; onClose: () => void; onCopy: (value: string, label: string) => void; onRefresh: () => void; onArchive: () => void }) {
   const t = getCopy(locale);
-  const confidenceTone = report.confidence >= 80 ? "text-[#168466] bg-[#EAF8F3]" : "text-[#C37B18] bg-[#FFF4E5]";
+  // The company row carries the company-level channels only. A channel that belongs
+  // to a person — whether it came from LinkedIn or from a published email with a name
+  // next to it — is rendered on that person's card, not as a loose address.
+  const { companyChannels: topChannels, departmentChannels: detailChannels, people } = buildReportSections(report);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-[#202233]/35 backdrop-blur-[1.5px]">
@@ -537,51 +650,100 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
           <div className="flex items-start gap-3.5">
             <Avatar report={report} size="lg" />
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2"><h2 className="truncate text-[20px] font-bold tracking-[-0.04em] text-[#2D3040]">{report.companyName}</h2><StatusPill status={report.status} locale={locale} /></div>
-              <p className="mt-1 flex items-center gap-1.5 text-[12px] text-[#7C8290]"><Globe2 size={13} /> {report.country} <span className="text-[#CFD1D8]">•</span> {report.industry}</p>
+              <h2 className="truncate text-[20px] font-bold tracking-[-0.04em] text-[#2D3040]">{report.companyName}</h2>
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#7C8290]">
+                <span>{report.country}</span>
+                <span className="text-[#CFD1D8]">•</span>
+                <span>{report.industry}</span>
+                {report.foundedYear ? <><span className="text-[#CFD1D8]">•</span><span>{locale === "vi" ? "Thành lập" : "Founded"} {report.foundedYear}</span></> : null}
+                {report.headcount ? <><span className="text-[#CFD1D8]">•</span><span>{report.headcount}</span></> : null}
+                {report.address ? <><span className="text-[#CFD1D8]">•</span><span>{report.address}</span></> : null}
+              </p>
+              {topChannels.length > 0 ? (
+                <ul className="mt-2.5 grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
+                  {topChannels.map((contact) => (
+                    <li key={`${contact.label}-${contact.value}`} className="flex min-w-0 items-center gap-1.5" title={contact.label}>
+                      <ContactIcon type={contact.type} />
+                      <ChannelValue contact={contact} className="min-w-0 flex-1 text-[11px]" />
+                      <CopyButton value={contact.value} label={contact.label} title={t.common.copy} onCopy={onCopy} />
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           </div>
 
           <div className="mt-5 rounded-2xl border border-[#E8EAF0] bg-white p-4">
             <div className="flex items-start justify-between gap-4">
-              <div><p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#9BA0AF]">{t.drawer.confidence}</p><p className="mt-1 text-[25px] font-bold tracking-[-0.05em] text-[#343746]">{report.confidence}<span className="text-sm text-[#858B99]">/100</span></p></div>
-              <span className={`rounded-full px-2.5 py-1.5 text-[11px] font-bold ${confidenceTone}`}>{report.confidence >= 80 ? t.drawer.verified : t.drawer.review}</span>
+              <div><p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#9BA0AF]">{t.drawer.confidence}</p><p className="mt-1 text-[25px] font-bold tracking-[-0.05em] text-[#343746]">{report.confidence}<span className="text-sm text-[#858B99]">/100</span></p>{report.sampleData ? <span className="mt-1.5 inline-flex rounded-full bg-[#F1F2F5] px-2 py-0.5 text-[10px] font-bold text-[#6C7280]">{t.dashboard.sampleBadge}</span> : null}</div>
             </div>
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#EDF0F3]"><div className={`h-full rounded-full ${report.confidence >= 80 ? "bg-[#32AD83]" : "bg-[#E9A143]"}`} style={{ width: `${report.confidence}%` }} /></div>
             <p className="mt-3 text-[11px] leading-5 text-[#757B8A]">{report.description}</p>
             <div className="mt-3 flex flex-wrap gap-1.5">{report.signals.map((signal) => <span key={signal} className="rounded-full bg-[#F4F5F8] px-2 py-1 text-[10px] font-semibold text-[#6C7280]">{signal}</span>)}</div>
           </div>
 
-          <div className="mt-6 flex items-center justify-between"><div><h3 className="text-[14px] font-bold text-[#333747]">{t.drawer.channels}</h3><p className="mt-1 text-[11px] text-[#8A90A0]">{t.drawer.channelsText}</p></div><span className="text-[11px] font-semibold text-[#6D63E8]">{report.contacts.length} fields</span></div>
-          <div className="mt-3 space-y-2">
-            {report.contacts.map((contact) => {
-              const canCopy = contact.value !== "Chưa xác minh" && contact.value !== "Not verified";
-              return (
-                <div key={`${contact.label}-${contact.value}`} className="flex items-center gap-3 rounded-xl border border-[#E9EBF0] bg-white px-3.5 py-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#F5F6F9]"><ContactIcon type={contact.type} /></div>
-                  <div className="min-w-0 flex-1"><p className="text-[10px] font-semibold text-[#9297A4]">{contact.label}</p><p className="mt-0.5 truncate text-[12px] font-bold text-[#3B3F4F]">{contact.value}</p></div>
-                  <div className="flex shrink-0 items-center gap-2"><div className="hidden text-right sm:block"><span className={`inline-flex items-center gap-1 text-[10px] font-bold ${contact.verified ? "text-[#209170]" : "text-[#A0A5B1]"}`}>{contact.verified ? <CircleCheckBig size={12} /> : <AlertCircle size={12} />}{contact.verified ? t.drawer.verifiedLabel : t.drawer.unverifiedLabel}</span><p className="mt-1 max-w-[108px] truncate text-[9px] text-[#A1A5B1]">{contact.source}</p></div><button type="button" disabled={!canCopy} onClick={() => onCopy(contact.value, contact.label)} title={t.common.copy} aria-label={`${t.common.copy} ${contact.label}`} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#E3E6EC] text-[#6257E7] transition hover:border-[#D7D1FF] hover:bg-[#F6F4FF] disabled:cursor-not-allowed disabled:opacity-35"><Copy size={15} /></button></div>
+          {report.customs ? (
+            <section className="mt-5">
+              <CustomsHistory customs={report.customs} isVietnamese={locale === "vi"} />
+            </section>
+          ) : null}
+
+          {people.length > 0 ? <PeoplePanel locale={locale} people={people} onCopy={onCopy} /> : null}
+
+          {report.requirements && report.requirements.length > 0 ? <RequirementsPanel locale={locale} requirements={report.requirements} /> : null}
+
+          {detailChannels.length > 0 ? (
+            <section className="mt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-[14px] font-bold text-[#333747]">{t.drawer.detailChannels}</h3>
+                  <p className="mt-1 text-[11px] text-[#8A90A0]">{t.drawer.detailChannelsText}</p>
                 </div>
-              );
-            })}
-          </div>
+                <span className="rounded-full bg-[#F0EEFF] px-2 py-1 text-[10px] font-bold text-[#6257E7]">{detailChannels.length}</span>
+              </div>
+              <div className="mt-3 space-y-2">
+                {detailChannels.map((contact) => (
+                  <article key={`${contact.label}-${contact.value}`} className="rounded-xl border border-[#E9EBF0] bg-white p-3.5">
+                    <div className="flex items-center gap-2">
+                      <ContactIcon type={contact.type} />
+                      <h4 className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#333747]">{contact.label}</h4>
+                      <CopyButton value={contact.value} label={contact.label} title={t.common.copy} onCopy={onCopy} />
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 pl-[22px]">
+                      <ChannelValue contact={contact} className="min-w-0 flex-1 text-[11px]" />
+                    </div>
+                    {contact.via ? <p className="mt-0.5 pl-[22px] text-[10px] text-[#8A90A0]">{contact.via}</p> : null}
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
 
           <div className="mt-6 flex items-center justify-between"><div><h3 className="text-[14px] font-bold text-[#333747]">{t.drawer.sources}</h3><p className="mt-1 text-[11px] text-[#8A90A0]">{t.drawer.sourcesText}</p></div><span className="rounded-full bg-[#F0EEFF] px-2 py-1 text-[10px] font-bold text-[#6257E7]">{report.sources.length} sources</span></div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {report.sources.map((source) => (
               <div key={source.url} className="group rounded-xl border border-[#E9EBF0] bg-white p-3 transition hover:border-[#D8D3FC] hover:bg-[#FCFBFF]">
                 <a href={source.url} target="_blank" rel="noreferrer" className="block">
-                  <div className="flex items-start justify-between gap-2"><span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-[#6A7080]">{source.kind === "social" ? <BriefcaseBusiness size={13} className="text-[#5C70CC]" /> : source.kind === "news" ? <FileSearch size={13} className="text-[#E89C43]" /> : <Globe2 size={13} className="text-[#6C63E9]" />}{source.label}</span><ExternalLink size={13} className="text-[#A1A6B2] group-hover:text-[#655BE7]" /></div>
-                  <p className="mt-2 truncate text-[10px] text-[#9095A3]">{source.url.replace(/^https?:\/\//, "")}</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-[#5D53E8] group-hover:text-[#4335CB] group-hover:underline">
+                      {source.kind === "social" ? <BriefcaseBusiness size={13} className="text-[#5C70CC]" /> : source.kind === "news" ? <FileSearch size={13} className="text-[#E89C43]" /> : <Globe2 size={13} className="text-[#6C63E9]" />}
+                      {source.label}
+                    </span>
+                    <ExternalLink size={13} className="text-[#A1A6B2] group-hover:text-[#655BE7]" />
+                  </div>
+                  <p className="mt-2 truncate text-[10px] font-medium text-[#7C74E8] group-hover:text-[#4335CB] group-hover:underline">{source.url.replace(/^https?:\/\//, "")}</p>
                 </a>
-                <div className="mt-2 flex items-center justify-between gap-2">{source.verified ? <span className="inline-flex items-center gap-1 text-[9px] font-bold text-[#209170]"><Check size={11} /> Evidence verified</span> : <span />}<button type="button" onClick={() => onCopy(source.url, source.label)} title={t.common.copy} aria-label={`${t.common.copy} ${source.label}`} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-bold text-[#6257E7] hover:bg-[#F2F0FF]"><Copy size={12} />{t.common.copy}</button></div>
+                <div className="mt-2 flex justify-end">
+                  <button type="button" onClick={() => onCopy(source.url, source.label)} title={t.common.copy} aria-label={`${t.common.copy} ${source.label}`} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-bold text-[#6257E7] hover:bg-[#F2F0FF]"><Copy size={12} />{t.common.copy}</button>
+                </div>
               </div>
             ))}
           </div>
 
           <div className="mt-6 rounded-2xl border border-[#E5E1FE] bg-[#F9F8FF] p-4">
             <div className="flex gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-[#655BE8] shadow-sm"><Clock3 size={17} /></div><div><p className="text-[12px] font-bold text-[#484064]">{t.drawer.snapshot} {report.daysLeft} {t.common.days}</p><p className="mt-1 text-[10px] leading-4 text-[#77738D]">{locale === "vi" ? `Lưu đến ${report.expiresAt}. ` : `Stored until ${report.expiresAt}. `}{t.drawer.snapshotText}</p></div></div>
-            <button type="button" onClick={onArchive} className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-[#5E53E8] hover:text-[#4035CA]"><Archive size={14} /> {t.drawer.archive}</button>
+            <button type="button" onClick={onArchive} className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-[#5E53E8] hover:text-[#4035CA]">{t.drawer.archive}</button>
           </div>
         </div>
 

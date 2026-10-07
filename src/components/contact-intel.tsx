@@ -1,0 +1,145 @@
+"use client";
+
+import { ClipboardList, Copy, FileText, Globe2, Mail, Phone, UserRound } from "lucide-react";
+
+import type { AppLocale } from "@/lib/i18n";
+import type { DecisionMaker } from "@/lib/demo-data";
+import type { Requirement, RequirementCategory } from "@/lib/requirements";
+
+/**
+ * What the report shows about people: who they are, their role, and the public
+ * channels found for them, each with its own icon and a copy button.
+ *
+ * Status marks do not belong here: no certainty / identity / policy badges and no
+ * "source: LinkedIn profile" line. Those labels stay in the model, the buyers list
+ * and the CSV; the report shows content and links.
+ */
+
+function ChannelIcon({ type }: { type: DecisionMaker["channels"][number]["type"] }) {
+  if (type === "email") return <Mail size={14} className="text-[#6C63E9]" />;
+  if (type === "phone") return <Phone size={14} className="text-[#3E9BC4]" />;
+  return <UserRound size={14} className="text-[#5C70CC]" />;
+}
+
+const REQUIREMENT_CATEGORY_LABELS: Record<RequirementCategory, { vi: string; en: string }> = {
+  certification: { vi: "Chứng nhận", en: "Certification" },
+  document: { vi: "Giấy tờ", en: "Document" },
+  audit: { vi: "Kiểm tra", en: "Audit" },
+  terms: { vi: "Điều khoản", en: "Terms" },
+  labelling: { vi: "Nhãn mác", en: "Labelling" },
+};
+
+/**
+ * Điều kiện & giấy tờ nhà nhập khẩu công bố đối với nhà cung cấp.
+ *
+ * Nhãn là bản dịch tên loại giấy tờ; phần câu chữ giữ **nguyên văn** của nhà nhập
+ * khẩu vì đó là bằng chứng, và mỗi mục link tới đúng trang/file đã thấy nó.
+ * Không có lời khuyên, không xếp hạng, không suy diễn thêm.
+ */
+export function RequirementsPanel({ locale, requirements }: { locale: AppLocale; requirements: Requirement[] }) {
+  const isVietnamese = locale === "vi";
+  if (requirements.length === 0) return null;
+
+  return (
+    <section className="mt-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-[14px] font-bold text-[#333747]">{isVietnamese ? "Điều kiện & giấy tờ nhà cung cấp phải đáp ứng" : "Supplier requirements & documents"}</h3>
+          <p className="mt-1 text-[11px] text-[#8A90A0]">
+            {isVietnamese ? "Nguyên văn yêu cầu nhà nhập khẩu đã công bố, kèm nguồn để bạn tự đối chiếu." : "The buyer's own published wording, with the source so you can check it."}
+          </p>
+        </div>
+        <span className="rounded-full bg-[#F0EEFF] px-2 py-1 text-[10px] font-bold text-[#6257E7]">{requirements.length}</span>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {requirements.map((item) => (
+          <article key={item.id} className="rounded-xl border border-[#E9EBF0] bg-white p-3.5">
+            <div className="flex items-center gap-2">
+              <ClipboardList size={14} className="shrink-0 text-[#737889]" />
+              <h4 className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#333747]">{item.label}</h4>
+              <span className="shrink-0 rounded-full bg-[#F4F5F8] px-2 py-0.5 text-[9px] font-semibold text-[#6C7280]">
+                {REQUIREMENT_CATEGORY_LABELS[item.category][isVietnamese ? "vi" : "en"]}
+              </span>
+            </div>
+            <p className="mt-1 pl-[22px] text-[11px] leading-5 text-[#5F6472]">“{item.detail}”</p>
+            <a href={item.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1.5 pl-[22px] text-[10px] font-semibold text-[#5D53E8] hover:text-[#4335CB] hover:underline">
+              {item.kind === "pdf" ? <FileText size={11} /> : <Globe2 size={11} />}
+              {item.sourceUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+            </a>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** A profile slug is a link; a bare value is not. */
+function channelHref(value: string): string | null {
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value)) return value;
+  return value.includes(".") ? `https://${value}` : null;
+}
+
+export function PeoplePanel({ locale, people, onCopy }: { locale: AppLocale; people: DecisionMaker[]; onCopy: (value: string, label: string) => void }) {
+  const isVietnamese = locale === "vi";
+  if (people.length === 0) return null;
+
+  return (
+    <section className="mt-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-[14px] font-bold text-[#333747]">{isVietnamese ? "Người liên quan" : "People"}</h3>
+          <p className="mt-1 text-[11px] text-[#8A90A0]">
+            {isVietnamese ? "Thông tin tìm được từ nguồn công khai." : "Found in public sources."}
+          </p>
+        </div>
+        <span className="rounded-full bg-[#F0EEFF] px-2 py-1 text-[10px] font-bold text-[#6257E7]">{people.length} {isVietnamese ? "người" : "people"}</span>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {people.map((person) => (
+          <article key={person.id} className="min-w-0 rounded-xl border border-[#E9EBF0] bg-white p-3.5">
+            <h4 className="text-[13px] font-bold text-[#333747]">{person.name}</h4>
+            {person.title ? <p className="mt-0.5 text-[11px] font-semibold text-[#5D6371]">{person.title}</p> : null}
+            {person.department ? <p className="mt-0.5 text-[10px] text-[#8A90A0]">{person.department}</p> : null}
+            {person.previousRole ? <p className="mt-0.5 text-[10px] text-[#8A90A0]">{person.previousRole}</p> : null}
+
+            {person.channels.length > 0 ? (
+              <div className="mt-2.5 space-y-1.5">
+                {person.channels.map((channel) => {
+                  const href = channelHref(channel.value);
+                  return (
+                    <div key={`${person.id}-${channel.value}`} className="flex items-center gap-2 rounded-lg bg-[#F8F9FC] px-2.5 py-2">
+                      <ChannelIcon type={channel.type} />
+                      <div className="min-w-0 flex-1">
+                        {href ? (
+                          <a href={href} target="_blank" rel="noreferrer" className="block truncate text-[11px] font-bold text-[#5D53E8] hover:text-[#4335CB] hover:underline">
+                            {channel.value}
+                          </a>
+                        ) : (
+                          <p className="truncate text-[11px] font-bold text-[#3B3F4F]">{channel.value}</p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onCopy(channel.value, person.name)}
+                        title={isVietnamese ? "Sao chép" : "Copy"}
+                        aria-label={`Copy ${channel.value}`}
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#E3E6EC] text-[#6257E7] transition hover:border-[#D7D1FF] hover:bg-[#F6F4FF]"
+                      >
+                        <Copy size={13} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {person.lastSeenAt ? <p className="mt-2.5 text-[10px] text-[#A1A5B1]">{isVietnamese ? "Thấy lần cuối" : "Last seen"} {person.lastSeenAt}</p> : null}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}

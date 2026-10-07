@@ -1,3 +1,5 @@
+import { marianiReport } from "@/lib/demo-mariani";
+
 export type ReportStatus = "ready" | "researching" | "needs_review";
 
 export type Source = {
@@ -7,15 +9,73 @@ export type Source = {
   verified?: boolean;
 };
 
+/** How sure we are that a value is the real one (mirrors `channel_certainty`). */
+import type { Requirement } from "@/lib/requirements";
+
+export type Certainty = "confirmed" | "probable" | "inferred";
+
+/** Whose address this is (mirrors `identity_match`). Delivery is a separate question. */
+export type IdentityMatch = "person" | "department" | "company_general" | "unknown";
+
+/** Whether a channel may be exported or used for outreach (mirrors `contact_export_policy`). */
+export type ChannelPolicy = "outreach_ready" | "needs_mailbox_check" | "manual_contact_only" | "requires_override";
+
 export type Contact = {
   label: string;
   value: string;
   type: "website" | "email" | "phone" | "linkedin" | "whatsapp";
   verified: boolean;
   source: string;
+  /** Optional provenance fields: present on data that came through the pipeline. */
+  certainty?: Certainty;
+  identityMatch?: IdentityMatch;
+  /** Khi `identityMatch === "person"`: tên và chức danh công bố kèm kênh này. */
+  personName?: string;
+  personTitle?: string;
+  via?: string;
+  sourceUrl?: string;
+  policy?: ChannelPolicy;
+};
+
+export type PersonChannel = {
+  type: "email" | "phone" | "linkedin";
+  value: string;
+  certainty: Certainty;
+  policy: ChannelPolicy;
+  note?: string;
+};
+
+/** A person found in a public source, with the channels found for them. */
+export type DecisionMaker = {
+  id: string;
+  name: string;
+  title: string;
+  department: string;
+  previousRole?: string;
+  identityMatch: IdentityMatch;
+  certainty: Certainty;
+  sourceLabel: string;
+  sourceUrl: string;
+  lastSeenAt: string;
+  channels: PersonChannel[];
+};
+
+/** What we looked for and did not find, or found and deliberately excluded. */
+export type IntelNote = {
+  kind: "not_found" | "excluded";
+  label: string;
+  detail: string;
+  sourceUrl?: string;
 };
 
 export type CompanyReport = {
+  /** Điều kiện & giấy tờ nhà nhập khẩu công bố đối với nhà cung cấp. */
+  requirements?: Requirement[];
+  /**
+   * Lịch sử & vai nhập khẩu đọc từ tờ khai hải quan (012). Chỉ có khi công ty
+   * này đã được nối với ít nhất một tờ khai — chưa có thì không hiện khối.
+   */
+  customs?: import("@/lib/customs/view").BuyerCustomsRow | null;
   id: string;
   companyName: string;
   initials: string;
@@ -24,19 +84,31 @@ export type CompanyReport = {
   sourceInput?: string;
   status: ReportStatus;
   confidence: number;
+  /**
+   * `true` khi nội dung là **dữ liệu mẫu** (provider demo), không phải kết quả
+   * đọc nguồn công khai. UI phải hiện nhãn cho người đọc — một report mẫu có
+   * "độ tin cậy 84/100" mà không có nhãn thì người đọc hiểu sai là dữ liệu thật.
+   */
+  sampleData?: boolean;
   createdAt: string;
   expiresAt: string;
   daysLeft: number;
   industry: string;
   description: string;
   website?: string;
+  /** Company facts the agreed output format calls for. */
+  foundedYear?: number;
+  headcount?: string;
+  address?: string;
   lastUpdated: string;
   contacts: Contact[];
   sources: Source[];
   signals: string[];
+  /** Decision makers / department routes, ranked for this search. */
+  people?: DecisionMaker[];
 };
 
-export const initialReports: CompanyReport[] = [
+export const initialReports: CompanyReport[] = [marianiReport, 
   {
     id: "report-nova",
     companyName: "Nova Distribution Ltd.",
@@ -174,6 +246,24 @@ export const initialReports: CompanyReport[] = [
     initials: "VF",
     accent: "#28A88B",
     country: "Germany",
+    // Ví dụ về khối lịch sử nhập khẩu: số vận đơn, ngày, mã HS đều là số mẫu.
+    // Vận đơn công bố không có email/điện thoại nên khối này không có kênh nào.
+    customs: {
+      recordsCount: 2,
+      firstShipment: "2026-02-18",
+      lastShipment: "2026-06-30",
+      hsCodes: ["090240", "210690"],
+      productSamples: ["Black tea, fermented", "Food preparations nes"],
+      supplierNames: ["HARVEST LANKA EXPORTS (PVT) LTD"],
+      supplierCountries: ["Sri Lanka (LK)"],
+      sourceLabels: ["Hải quan — vận đơn công bố"],
+      matchMethods: ["exact_name_country"],
+      lastDecidedAt: "2026-10-04T10:05:00Z",
+      roles: [
+        { role: "importer", side: "importer_side", records_count: 2, last_shipment: "2026-06-30" },
+        { role: "notify_party", side: "unknown", records_count: 2, last_shipment: "2026-06-30" },
+      ],
+    },
     status: "needs_review",
     confidence: 67,
     createdAt: "02/10/2026",
@@ -227,11 +317,29 @@ function toSlug(value: string) {
     .replace(/(^-|-$)/g, "");
 }
 
+/**
+ * Companies we have already researched from public sources. When someone
+ * searches one of these, the demo returns the real report — with sources,
+ * confidence labels and the not-found notes — instead of synthetic data.
+ */
+const KNOWN_FIXTURES: { match: RegExp; report: CompanyReport }[] = [
+  { match: /mariani|mariani\.com/i, report: marianiReport },
+];
+
 export function createDemoReport(input: {
   companyName?: string;
   sourceUrl?: string;
   country?: string;
 }): CompanyReport {
+  const probe = `${input.companyName ?? ""} ${input.sourceUrl ?? ""}`;
+  const known = KNOWN_FIXTURES.find((fixture) => fixture.match.test(probe));
+
+  if (known) {
+    const now = new Date();
+    const stamped = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+    return { ...known.report, id: `report-${Date.now()}`, createdAt: `Hôm nay, ${stamped}`, lastUpdated: `${stamped} hôm nay`, sampleData: true };
+  }
+
   const fromUrl = input.sourceUrl
     ?.replace(/^https?:\/\//, "")
     .replace(/^www\./, "")
@@ -268,6 +376,8 @@ export function createDemoReport(input: {
     initials: initials || "CR",
     accent: "#4F7CFF",
     country: input.country || "Chưa xác định",
+    // Provider mẫu — UI phải nói ra, và không tính credits (xem research-provider.ts).
+    sampleData: true,
     sourceInput: input.sourceUrl,
     status: "ready",
     confidence: input.sourceUrl ? 91 : 84,

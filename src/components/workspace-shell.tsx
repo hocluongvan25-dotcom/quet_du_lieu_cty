@@ -5,6 +5,7 @@ import { ReactNode } from "react";
 import {
   Archive,
   Bell,
+  Building2,
   ChevronDown,
   ChevronRight,
   CircleHelp,
@@ -19,10 +20,14 @@ import {
   Users,
 } from "lucide-react";
 import { LanguageSwitcher } from "@/components/language-switcher";
+import { SignOutButton } from "@/components/sign-out-button";
+import { WorkspaceNotice } from "@/components/workspace-notice";
+import { useWorkspace } from "@/components/workspace-provider";
+import { DEMO_CREDITS } from "@/lib/data/workspace-types";
 import { getCopy, normalizeLocale } from "@/lib/i18n";
 import { useParams } from "next/navigation";
 
-type WorkspaceNavKey = "overview" | "reports" | "archive" | "history" | "team" | "billing" | "settings";
+type WorkspaceNavKey = "overview" | "reports" | "buyers" | "archive" | "history" | "team" | "billing" | "settings";
 
 type WorkspaceShellProps = {
   children: ReactNode;
@@ -36,10 +41,14 @@ export function WorkspaceShell({ children, active }: WorkspaceShellProps) {
   const locale = normalizeLocale(params?.locale);
   const t = getCopy(locale);
   const prefix = `/${locale}`;
+  const workspace = useWorkspace();
+  const account = workspace.account;
+  const credits = account?.credits ?? DEMO_CREDITS;
 
   const primary: Array<{ key: WorkspaceNavKey; icon: typeof LayoutDashboard; href: string }> = [
     { key: "overview", icon: LayoutDashboard, href: prefix },
     { key: "reports", icon: FileSearch, href: `${prefix}/reports` },
+    { key: "buyers", icon: Building2, href: `${prefix}/buyers` },
     { key: "archive", icon: Archive, href: `${prefix}/archive` },
     { key: "history", icon: History, href: `${prefix}/history` },
   ];
@@ -84,14 +93,19 @@ export function WorkspaceShell({ children, active }: WorkspaceShellProps) {
           <Link href={`${prefix}/archive`} className="mt-3 inline-flex items-center gap-1 text-[11px] font-bold text-[#5C52E8] hover:text-[#4339C9]">{locale === "vi" ? "Xem kho lưu trữ" : "View archive"}<ChevronRight size={13} /></Link>
         </div>
 
-        <div className="mt-4 flex items-center gap-2.5 rounded-xl px-2 py-2"><div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#DFF4F0] text-[11px] font-bold text-[#218A72]">AN</div><div className="min-w-0 flex-1"><p className="truncate text-[12px] font-bold text-[#343747]">Anh Nguyen</p><p className="truncate text-[10px] text-[#8A90A0]">{t.starter}</p></div><ChevronDown size={15} className="text-[#989DAC]" /></div>
+        <div className="mt-4 flex items-center gap-2.5 rounded-xl px-2 py-2"><div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#DFF4F0] text-[11px] font-bold text-[#218A72]">{account?.initials ?? "AN"}</div><div className="min-w-0 flex-1"><p className="truncate text-[12px] font-bold text-[#343747]">{account?.displayName ?? (locale === "vi" ? "Khách demo" : "Demo guest")}</p><p className="truncate text-[10px] text-[#8A90A0]">{account ? `${account.plan} · ${account.organizationName}` : t.starter}</p></div><ChevronDown size={15} className="text-[#989DAC]" /></div>
       </aside>
 
       <main className="min-h-screen lg:pl-[252px]">
         <header className="sticky top-0 z-20 flex h-[70px] items-center justify-between border-b border-[#E9EBF0] bg-white/90 px-5 backdrop-blur-xl sm:px-7 lg:px-9">
           <div className="flex items-center gap-3"><button type="button" className="rounded-lg p-2 text-[#606576] hover:bg-[#F4F5F7] lg:hidden" aria-label="Menu"><Menu size={20} /></button><div><div className="flex items-center gap-1.5 text-[11px] font-medium text-[#969BA9]"><span>{t.workspace}</span><ChevronRight size={12} /><span className="text-[#525766]">{t.nav[active]}</span></div><p className="mt-0.5 text-[13px] font-semibold text-[#363A49]">Research workspace</p></div></div>
-          <div className="flex items-center gap-2 sm:gap-3"><button type="button" className="hidden rounded-xl border border-[#E7E9EF] bg-white px-3 py-2 text-[12px] font-semibold text-[#5F6471] sm:inline-flex"><CircleHelp size={15} className="mr-1.5" />{t.help}</button><LanguageSwitcher /><button type="button" className="relative rounded-xl p-2.5 text-[#656B79] transition hover:bg-[#F3F4F7]" aria-label="Notifications"><Bell size={19} /><span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-[#755EF7] ring-2 ring-white" /></button><Link href={`${prefix}/billing`} className="inline-flex items-center gap-2 rounded-xl border border-[#E8E5FF] bg-[#FAF9FF] px-3 py-2 text-[12px] font-bold text-[#5C52E8] transition hover:bg-[#F3F1FF]"><Sparkles size={15} fill="currentColor" /><span className="hidden sm:inline">128 credits</span><span className="sm:hidden">128</span></Link></div>
+          <div className="flex items-center gap-2 sm:gap-3"><button type="button" className="hidden rounded-xl border border-[#E7E9EF] bg-white px-3 py-2 text-[12px] font-semibold text-[#5F6471] sm:inline-flex"><CircleHelp size={15} className="mr-1.5" />{t.help}</button><LanguageSwitcher /><button type="button" className="relative rounded-xl p-2.5 text-[#656B79] transition hover:bg-[#F3F4F7]" aria-label="Notifications"><Bell size={19} /><span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-[#755EF7] ring-2 ring-white" /></button><Link href={`${prefix}/billing`} className="inline-flex items-center gap-2 rounded-xl border border-[#E8E5FF] bg-[#FAF9FF] px-3 py-2 text-[12px] font-bold text-[#5C52E8] transition hover:bg-[#F3F1FF]"><Sparkles size={15} fill="currentColor" /><span className="hidden sm:inline">{credits} credits</span><span className="sm:hidden">{credits}</span></Link><SignOutButton /></div>
         </header>
+        {workspace.state === "live" ? null : (
+          <div className="mx-auto max-w-[1460px] px-5 pt-5 sm:px-7 lg:px-9">
+            <WorkspaceNotice />
+          </div>
+        )}
         {children}
       </main>
     </div>

@@ -1,0 +1,7 @@
+# fixture: robots.txt của một site dạng Shopify
+User-agent: *
+Disallow: /cart
+Disallow: /account
+Disallow: /checkout
+Disallow: /documents/quality-certification
+Allow: /pages/
