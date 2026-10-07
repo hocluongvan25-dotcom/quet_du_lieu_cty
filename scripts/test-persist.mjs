@@ -520,6 +520,68 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   await db.query("select set_config('request.jwt.claim.sub', $1, false)", ["aaaaaaaa-0000-0000-0000-000000000001"]);
   const realOrgId = (await db.query("select public.bootstrap_workspace('Acme Research') as id")).rows[0].id;
 
+  // ------------------------------------- 2b. credits: giá thật của hai provider --
+  // Người dùng nhìn thấy số credits trên màn hình, nên chỗ này phải chứng minh
+  // bằng DB thật: provider mẫu (p_cost = 0) không trừ đồng nào và không ghi sổ.
+  const bootstrapLedger = (
+    await db.query("select type, amount, description from public.credit_ledger where organization_id = $1 order by created_at", [realOrgId])
+  ).rows;
+  check(
+    "workspace mới có đúng một dòng sổ: Starter grant +50",
+    bootstrapLedger.length === 1 && bootstrapLedger[0].type === "credit" && bootstrapLedger[0].amount === 50,
+    JSON.stringify(bootstrapLedger),
+  );
+
+  const sampleReport = {
+    company_name: "Vinamilk",
+    country: "Chưa xác định",
+    confidence: 84,
+    provider: "demo",
+    official_website: "https://vinamilk.example",
+  };
+  await db.query(
+    `select public.complete_research_job(
+       p_organization_id => $1, p_input_company_name => 'Vinamilk',
+       p_report => $2::jsonb, p_evidence => '[]'::jsonb, p_cost => 0, p_retention_days => 30)`,
+    [realOrgId, JSON.stringify(sampleReport)],
+  );
+  const balanceAfterSample = (await db.query("select credits_balance from public.organizations where id = $1", [realOrgId])).rows[0].credits_balance;
+  const ledgerAfterSample = (await db.query("select count(*)::int as n from public.credit_ledger where organization_id = $1", [realOrgId])).rows[0].n;
+  check("report dữ liệu mẫu (p_cost = 0) không trừ credits", balanceAfterSample === 50, String(balanceAfterSample));
+  check("và không phát sinh dòng nào trong sổ credits", ledgerAfterSample === 1, String(ledgerAfterSample));
+
+  await db.query(
+    `select public.complete_research_job(
+       p_organization_id => $1, p_input_company_name => 'Nova Distribution Ltd.',
+       p_report => $2::jsonb, p_evidence => '[]'::jsonb, p_cost => 5, p_retention_days => 30)`,
+    [realOrgId, JSON.stringify({ ...sampleReport, company_name: "Nova Distribution Ltd.", provider: "connector" })],
+  );
+  const balanceAfterReal = (await db.query("select credits_balance from public.organizations where id = $1", [realOrgId])).rows[0].credits_balance;
+  const ledgerAfterReal = (await db.query("select type, amount from public.credit_ledger where organization_id = $1 order by created_at", [realOrgId])).rows;
+  check("provider thật (p_cost = 5) trừ đúng 5 credits", balanceAfterReal === 45, String(balanceAfterReal));
+  check(
+    "và ghi đúng một dòng trừ tiền, đúng 5",
+    ledgerAfterReal.length === 2 && ledgerAfterReal[1].type === "debit" && ledgerAfterReal[1].amount === 5,
+    JSON.stringify(ledgerAfterReal),
+  );
+  check(
+    "cả hai report đều nằm trong company_reports",
+    (await db.query("select count(*)::int as n from public.company_reports where organization_id = $1", [realOrgId])).rows[0].n === 2,
+  );
+
+  let nullCostRejected = false;
+  try {
+    await db.query(
+      `select public.complete_research_job(
+         p_organization_id => $1, p_input_company_name => 'Null Cost Ltd.',
+         p_report => '{}'::jsonb, p_evidence => '[]'::jsonb, p_cost => null)`,
+      [realOrgId],
+    );
+  } catch {
+    nullCostRejected = true;
+  }
+  check("p_cost = null vẫn bị từ chối (không thể lách thành miễn phí)", nullCostRejected === true);
+
   const store = pgliteStore(db);
   const first = await api.saveBuyerDiscovery(store, { ...batch, organizationId: realOrgId });
   check("ghi lần đầu thành công", first.ok === true, first.ok ? "" : first.reason);

@@ -242,7 +242,7 @@ A line only becomes an item when it names one of those and either carries requir
 
 ```bash
 npm run requirements:test   # 24 checks: no fabrication, verbatim evidence, sources, PDF, no advice
-npm run persist:test      # 144 checks: rows built from real findings, written into a real Postgres, read back through the app's views, gated, verified, exported, WhatsApp-checked, and customs records linked end to end
+npm run persist:test      # 151 checks: rows built from real findings, written into a real Postgres, read back through the app's views, gated, verified, exported, WhatsApp-checked, and customs records linked end to end
 npm run roles:test        # 33 checks: title classification order (a procurement director is not management), other ≠ unknown
 npm run customs:test      # 105 checks: reading a customs CSV, mapping columns to fields, refusing to guess, ranking candidates
 npm run reverify:test     # 37 checks: three answers to "is this value still there", and what each one changes
@@ -310,6 +310,8 @@ curl -s -X POST localhost:3000/api/connector \
 ```
 
 Four rules the write layer cannot break, all covered by `npm run persist:test`:
+
+Two of those checks are the credit price, proven against the real schema: a report written with `p_cost = 0` (the demo provider) leaves both the balance and the ledger untouched, while `p_cost = 5` debits exactly 5 and writes exactly one ledger row — and `p_cost = null` is still rejected, so a missing price can never quietly turn into a free report.
 
 1. **`contact_candidates` stays empty.** That table is for pattern-guessed emails; the connector never guesses one.
 2. **`is_verified` stays `false`.** "This value is on a public page" is not "this mailbox belongs to that person", and the schema keeps the two apart.
