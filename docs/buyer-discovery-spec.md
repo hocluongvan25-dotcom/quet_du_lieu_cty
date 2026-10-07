@@ -219,6 +219,27 @@ Lý do không chỉ là "đúng phạm vi sản phẩm", mà là **niềm tin**:
 
 Thiếu dữ liệu thì người dùng tự đi tìm — không mất gì. Lời khuyên sai thì mất niềm tin, và mất luôn những dữ liệu đúng đi kèm.
 
+### Sai sót là bình thường — nhưng "tự tin mà sai" thì không (07/10/2026)
+
+Người dùng thật **không kỳ vọng đúng 100%**. Họ tự kiểm dòng quan trọng trước khi gọi hay gửi email, và họ quen với việc dữ liệu ngoài thị trường có sai số. Vì vậy mục tiêu của hệ thống **không phải** "không bao giờ sai" — mục tiêu là **sai sót tự lộ ra, và sửa rẻ**.
+
+Bộ lọc dùng khi quyết định sửa gì, sửa ngay hay để sau:
+
+| Mức | Ví dụ thật | Xử lý |
+| --- | --- | --- |
+| **1. Sai, nhưng trông như đúng** | Số tổng đài của American Arbitration Association thành "Điện thoại công bố" của Mariani, kèm nhãn **đã thấy công bố** | Sửa ngay. Đây là loại duy nhất phá niềm tin |
+| **2. Chưa kiểm được, và nói rõ là chưa kiểm** | SEC trả về định dạng lạ; chưa có tài khoản Cloud API nên chưa kiểm WhatsApp; 0 kết quả search | **Chấp nhận.** Chỉ cần câu chữ đừng giả vờ là kết luận |
+| **3. Thiếu dữ liệu mà nói rõ là thiếu** | Không tìm được cửa mua hàng; trang bị robots.txt chặn | **Chấp nhận.** Người dùng tự đi tìm — không mất gì |
+| **4. Không đọc được, nhưng bị viết thành "không có"** | Đọc CIK thất bại → in "không tìm thấy hồ sơ theo tên này" | Sửa ngay — đây là mức 1 trá hình |
+
+Ranh giới duy nhất phải giữ, và nó không phải là đòi hỏi hoàn hảo:
+
+> **Không được nói "chắc chắn" khi chưa biết. Không được giấu việc mình chưa kiểm.**
+
+Đó chính là điều làm cho mức sai sót bình thường trở nên **dùng được**: một dòng sai mà có kèm nguồn và câu văn trích dẫn thì người dùng sửa trong năm giây; một dòng sai mà tự tin thì họ mất một cuộc gọi, hoặc gửi email cho nhầm người. Vì vậy mọi thứ đã có trong dự án đều phục vụ đúng việc này: nhãn tin cậy, câu văn thấy trên trang, danh sách "đã loại trừ kèm lý do", ba trạng thái của `has_whatsapp`, và câu "0 kết quả không có nghĩa là khoá hỏng".
+
+**Hệ quả ngược lại cũng phải nhớ:** luật chặt để tránh mức 1 sẽ **bỏ sót dữ liệu thật**. Luật số điện thoại mới (nhãn phải nằm ngay trước số) sẽ bỏ vài số thật trên trang viết ẩu — chấp nhận được, vì số bị bỏ **nằm trong "đã loại trừ" nên lấy lại được**, còn cuộc gọi nhầm cho bên thứ ba thì không lấy lại được. Nguyên tắc: khi phải chọn giữa "bỏ sót" và "nói sai", chọn bỏ sót — nhưng **phải ghi lại cái đã bỏ sót**.
+
 Chốt chặn kỹ thuật: `npm run check:content` quét `src/lib` và `src/components`, báo lỗi nếu xuất hiện trường mang tính khuyên bảo (xếp hạng, "vì sao nên gặp", mức ưu tiên, cẩm nang). Ngoài ra TypeScript đã chặn ở tầng kiểu: các trường đó không còn tồn tại trong `CompanyReport`, nên viết lại sẽ lỗi biên dịch ngay.
 
 ---
