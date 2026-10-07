@@ -100,9 +100,9 @@ import { buildBuyerWriteBatch } from "@/lib/connector/persist";
 import { toE164, whatsappLink, isE164, resolveCountry } from "@/lib/connector/phone";
 import { readSitemap } from "@/lib/connector/sitemap";
 import { coverageOf, secondaryReason } from "@/lib/connector/gate";
-import { searchSite, harvestUrlsFromSearch, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry } from "@/lib/connector/secondary";
+import { searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry, buildSearchRequest, parseSearchHits, resolveProvider } from "@/lib/connector/secondary";
 
-export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, searchSite, harvestUrlsFromSearch, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry };
+export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry };
 `;
   await mkdir(workDir, { recursive: true });
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
@@ -486,6 +486,37 @@ async function runChecks(api, files) {
   check("không có khoá thì không gọi mạng", noKeyHarvest.urls.length === 0 && noKeyHarvest.provider === null && noKeyHarvest.queriesRun === 0);
   const harvest = await api.harvestUrlsFromSearch("acmespices.co.uk", { apiKey: "test-key", fetchImpl: searchFetch, log: () => {}, limit: 2 });
   check("thu hoạch chỉ trả URL cùng tên miền, đã bỏ trùng", harvest.urls.length === 1 && harvest.documents.length === 0 && harvest.queriesRun > 0, JSON.stringify(harvest));
+
+
+  // Ba nhà cung cấp, ba hình dạng request khác nhau — kiểm cả ba, vì đổi nhà
+  // cung cấp là việc người dùng làm một mình, không cần sửa code.
+  const serperRequest = api.buildSearchRequest("acmespices.co.uk", "supplier registration", "serper", "k1");
+  check("serper: POST, khoá ở header", /google\.serper\.dev/.test(serperRequest.url) && serperRequest.init.headers["x-api-key"] === "k1");
+  const tavilyRequest = api.buildSearchRequest("acmespices.co.uk", "supplier registration", "tavily", "k2");
+  check("tavily: POST, khoá trong body đúng như nhà cung cấp yêu cầu", JSON.parse(String(tavilyRequest.init.body)).api_key === "k2");
+  const braveRequest = api.buildSearchRequest("acmespices.co.uk", "supplier registration", "brave", "k3");
+  check("brave: GET, khoá ở header riêng", braveRequest.init.method === undefined && braveRequest.init.headers["x-subscription-token"] === "k3" && braveRequest.url.includes("api.search.brave.com"));
+  check("cả ba đều luôn có site: trong truy vấn", [serperRequest, tavilyRequest, braveRequest].every((request) => JSON.stringify(request.init.body ?? decodeURIComponent(request.url)).includes("site:acmespices.co.uk")));
+  check("khoá không bao giờ nằm trong URL", [serperRequest, tavilyRequest, braveRequest].every((request) => !request.url.includes("k1") && !request.url.includes("k2") && !request.url.includes("k3")));
+
+  check(
+    "hình dạng kết quả của brave đọc được và vẫn lọc ngoài tên miền",
+    api.parseSearchHits(
+      { web: { results: [{ url: "https://acmespices.co.uk/contact", title: "Contact", description: "Phone" }, { url: "https://other.example/x", title: "Khác" }] } },
+      "brave",
+      "acmespices.co.uk",
+    ).length === 1,
+  );
+  check(
+    "hình dạng kết quả của tavily đọc được",
+    api.parseSearchHits({ results: [{ url: "https://acmespices.co.uk/suppliers", content: "supplier page" }] }, "tavily", "acmespices.co.uk")[0]?.snippet === "supplier page",
+  );
+  check(
+    "kết quả hỏng bị bỏ, không làm gãy lần chạy",
+    api.parseSearchHits({ organic: [{ title: "Không có URL" }, { link: "không phải URL" }, { link: "https://sub.acmespices.co.uk/x" }] }, "serper", "acmespices.co.uk").length === 1,
+  );
+  check("payload rỗng không làm gãy", api.parseSearchHits(undefined, "serper", "acmespices.co.uk").length === 0);
+  check("không nêu nhà cung cấp thì mặc định serper", api.resolveProvider("k", undefined) === "serper" && api.resolveProvider(undefined, "brave") === null);
 
   section("sổ đăng ký doanh nghiệp");
   check("chọn sổ theo quốc gia", api.registriesForCountry("UK")[0] === "companies_house" && api.registriesForCountry("United States")[0] === "sec_edgar");

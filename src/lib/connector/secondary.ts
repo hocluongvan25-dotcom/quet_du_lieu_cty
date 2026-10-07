@@ -52,6 +52,73 @@ export function resolveProvider(apiKey?: string, explicit?: SearchProvider): Sea
 type RawHit = { url?: string; title?: string; snippet?: string; description?: string; link?: string; name?: string; content?: string };
 
 /**
+ * Một chỗ duy nhất biết hình dạng request của từng nhà cung cấp.
+ *
+ * Tách ra để lệnh tự-kiểm (`npm run search:check`) dùng đúng cùng một request với
+ * connector — nếu connector đổi cách gọi mà lệnh kiểm không đổi, hai bên sẽ lệch
+ * nhau và lệnh kiểm trở thành lời nói dối.
+ */
+export function buildSearchRequest(domain: string, query: string, provider: SearchProvider, apiKey: string): { url: string; init: RequestInit } {
+  const scoped = `site:${domain} ${query}`;
+
+  if (provider === "serper") {
+    return {
+      url: "https://google.serper.dev/search",
+      init: {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": apiKey },
+        body: JSON.stringify({ q: scoped, num: 10 }),
+      },
+    };
+  }
+
+  if (provider === "tavily") {
+    return {
+      url: "https://api.tavily.com/search",
+      init: {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey, query: scoped, max_results: 10, search_depth: "basic" }),
+      },
+    };
+  }
+
+  return {
+    url: `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(scoped)}&count=10`,
+    init: { headers: { accept: "application/json", "x-subscription-token": apiKey } },
+  };
+}
+
+/**
+ * Đọc kết quả trả về thành các trang **cùng tên miền**. Hàng rào này giữ cả khi
+ * nhà cung cấp trả về kết quả ngoài tên miền dù câu truy vấn đã có `site:`.
+ */
+export function parseSearchHits(payload: unknown, provider: SearchProvider, domain: string): SearchHit[] {
+  const body = (payload ?? {}) as Record<string, unknown>;
+  const rows: RawHit[] =
+    provider === "serper"
+      ? ((body.organic as RawHit[]) ?? [])
+      : provider === "tavily"
+        ? ((body.results as RawHit[]) ?? [])
+        : (((body.web as { results?: RawHit[] } | undefined)?.results as RawHit[]) ?? []);
+
+  const hits: SearchHit[] = [];
+  for (const row of rows) {
+    const url = row.url ?? row.link;
+    if (!url) continue;
+    let host: string;
+    try {
+      host = new URL(url).hostname;
+    } catch {
+      continue;
+    }
+    if (registrableDomain(host) !== registrableDomain(domain)) continue;
+    hits.push({ url, title: row.title ?? row.name ?? "", snippet: row.snippet ?? row.description ?? row.content ?? "" });
+  }
+  return hits;
+}
+
+/**
  * Tìm trang trên **chính tên miền của công ty**. Câu truy vấn luôn có `site:`,
  * nên không có chuyện lấy dữ liệu từ website khác rồi gán cho công ty này.
  */
@@ -62,62 +129,15 @@ export async function searchSite(domain: string, query: string, options: SearchO
 
   const apiKey = options.apiKey!;
   const fetchImpl = options.fetchImpl ?? fetch;
-  const scoped = `site:${domain} ${query}`;
-
-  const request =
-    provider === "serper"
-      ? {
-          url: "https://google.serper.dev/search",
-          init: {
-            method: "POST",
-            headers: { "content-type": "application/json", "x-api-key": apiKey },
-            body: JSON.stringify({ q: scoped, num: 10 }),
-          } as RequestInit,
-        }
-      : provider === "tavily"
-        ? {
-            url: "https://api.tavily.com/search",
-            init: {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ api_key: apiKey, query: scoped, max_results: 10, search_depth: "basic" }),
-            } as RequestInit,
-          }
-        : {
-            url: `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(scoped)}&count=10`,
-            init: { headers: { accept: "application/json", "x-subscription-token": apiKey } } as RequestInit,
-          };
 
   try {
+    const request = buildSearchRequest(domain, query, provider, apiKey);
     const response = await fetchImpl(request.url, request.init);
     if (!response.ok) {
       log(`search (${provider}): HTTP ${response.status} — bỏ qua`);
       return [];
     }
-    const payload = (await response.json()) as Record<string, unknown>;
-
-    const rows: RawHit[] =
-      provider === "serper"
-        ? ((payload.organic as RawHit[]) ?? [])
-        : provider === "tavily"
-          ? ((payload.results as RawHit[]) ?? [])
-          : (((payload.web as { results?: RawHit[] } | undefined)?.results as RawHit[]) ?? []);
-
-    const hits: SearchHit[] = [];
-    for (const row of rows) {
-      const url = row.url ?? row.link;
-      if (!url) continue;
-      let host: string;
-      try {
-        host = new URL(url).hostname;
-      } catch {
-        continue;
-      }
-      // Hàng rào cuối: search có thể trả về kết quả ngoài tên miền dù đã có site:.
-      if (registrableDomain(host) !== registrableDomain(domain)) continue;
-      hits.push({ url, title: row.title ?? row.name ?? "", snippet: row.snippet ?? row.description ?? row.content ?? "" });
-    }
-
+    const hits = parseSearchHits(await response.json(), provider, domain);
     log(`search (${provider}): ${hits.length} kết quả cùng tên miền`);
     return hits;
   } catch (error) {

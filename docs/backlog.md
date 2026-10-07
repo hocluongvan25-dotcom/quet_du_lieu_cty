@@ -22,16 +22,22 @@ Yêu cầu gồm ba phần. Trạng thái từng phần:
 
 Nút `wa.me` **đã có** ở danh sách buyer, nhưng nó chỉ hiện khi `has_whatsapp = true`, và hiện tại **chưa có gì điền giá trị đó** — nên nút đang nằm im, đúng như thiết kế: không kiểm thì không hiện.
 
-Để bật, cần một trong hai:
+**Đã tra lại bốn đường (07/10/2026), và đây là chọn lựa thật:**
 
-- **API kiểm số có WhatsApp** (ví dụ một dịch vụ kiểm WhatsApp Business, hoặc tự gọi endpoint công khai của WhatsApp — cần đánh giá điều khoản trước), hoặc
-- **Nguồn công bố**: trang công ty để link `wa.me/…` → khi đó số đó là số WhatsApp do chính công ty công bố, và được ghi thành một kênh `whatsapp` với URL nguyên văn (đường này **đã chạy** — `extract.ts` đọc link `wa.me`/`whatsapp.com`).
+| # | Đường | Kiểm trước khi gửi? | Chi phí | Rủi ro |
+| --- | --- | --- | --- | --- |
+| A | **Cloud API `POST /{phone_number_id}/contacts`** (`contacts` + `force_check`) | Có, nếu endpoint chạy với tài khoản của mình | Theo hội thoại/tin nhắn Cloud API | Không rủi ro khoá. **Chưa có tài liệu chính thức** (trang `reference/contacts` trả 404); báo cáo cộng đồng 02/2026 dùng được → phải tự thử trước khi tin |
+| B | **Gửi một template rồi đọc webhook trạng thái** | Không hẳn — gửi thật rồi đọc: `sent` = số có WhatsApp, `delivered` = máy đã nhận; `131026` là nhóm "số xấu" nhưng nhiễu | Mỗi lần kiểm là **một tin thật**, trả tiền theo tin (WhatsApp **không** tính tiền tin gửi tới số không tồn tại) | Không rủi ro kỹ thuật, nhưng cần cơ sở liên hệ (opt-in) + đúng template; không dùng làm máy quét hàng loạt |
+| C | **Twilio** | **Không có API kiểm.** Tài liệu Twilio (25/09/2026) tự chỉ người dùng mở `wa.me/<số>` bằng tay hoặc đọc Error Logs | — | — |
+| D | **Gateway không chính thức** (Green API `checkWhatsapp`, Whapi.Cloud…) | Có, theo lô | Green API từ ~12 USD/tháng/instance; `checkWhatsapp` 100 lượt/tháng (Developer) → 30.000 (Business) | **Trái điều khoản Meta**: gateway chạy qua một phiên WhatsApp Web đã đăng nhập, số dùng để kiểm **có thể bị khoá**, và bên thứ ba đọc được danh sách số đưa vào |
 
-Khi cắm dịch vụ kiểm, việc phải làm là một bước ghi:
+**Khuyến nghị:** thử **A** trước bằng tài khoản Cloud API thật (nếu chạy, đây là đường sạch nhất và rẻ nhất: kiểm được trước khi gửi, không rủi ro khoá). Nếu A không chạy, dùng **B** nhưng chỉ như một bước gửi thật có kiểm soát — không phải máy quét. **D bị loại trừ theo đúng nguyên tắc đã theo cả dự án: không log in, không dùng phiên không chính thức, không đặt số của khách vào tay bên thứ ba.**
+
+Khi cắm (theo A hoặc B), việc phải làm là một bước ghi:
 
 ```sql
 update public.contact_channels
-   set has_whatsapp = true, whatsapp_checked_at = now(), whatsapp_checked_by = '<tên dịch vụ>'
+   set has_whatsapp = true, whatsapp_checked_at = now(), whatsapp_checked_by = '<tên dịch vụ hoặc "cloud_api_template">'
  where id = '<channel-id>';
 ```
 

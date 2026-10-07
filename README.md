@@ -94,7 +94,8 @@ Runs every file in `supabase/migrations` against an in-process Postgres (PGlite,
 ### Verify the connection
 
 ```bash
-npm run supabase:check
+npm run supabase:check   # auth, tables, bucket — and whether the project is reachable
+npm run search:check     # the search provider key, using the connector's own request
 ```
 
 The check reads `.env.local` and reports whether the URL and anon key belong to the same project, whether Auth is reachable and which providers are enabled, whether every table from the migration exists, and whether the private `research-artifacts` bucket is present. It exits non-zero when a check fails, so it can gate a deploy or a CI job.
@@ -267,7 +268,7 @@ npm run connector:run acmespices.co.uk -- --no-secondary   # company site only
 | `persist.ts` | Builds the database rows (pure) and writes them through a small store port: `buyer_profiles`, `decision_makers`, `contact_channels`, `buyer_routes` |
 
 ```bash
-npm run connector:test    # 182 checks on real HTML and PDF fixtures, no network needed
+npm run connector:test    # 192 checks on real HTML and PDF fixtures, no network needed
 npm run connector:run mariani.com            # real run, human readable
 npm run connector:run mariani.com -- --json  # full JSON
 ```
@@ -276,11 +277,13 @@ npm run connector:run mariani.com -- --json  # full JSON
 
 | Source | Key | What it can add — and what it never adds |
 | --- | --- | --- |
-| Search API (Serper / Tavily / Brave) | `SEARCH_API_KEY`, `SEARCH_PROVIDER` | **URLs inside the company domain** (`site:` is always in the query). Search snippets are never evidence; the page is fetched and quoted as usual. Off-domain hits are dropped twice. |
+| Search API (Serper / Tavily / Brave) | `SEARCH_API_KEY`, `SEARCH_PROVIDER` | **URLs inside the company domain** (`site:` is always in the query). Search snippets are never evidence; the page is fetched and quoted as usual. Off-domain hits are dropped twice. Google's and Microsoft's own search APIs are no longer an option: Bing Search was retired on 11/08/2025 and Google's Custom Search JSON API is closed to new customers and ends 01/01/2027 — hence the three providers above. |
 | UK Companies House | `COMPANIES_HOUSE_API_KEY` | Legal name, company number, status, incorporation date, SIC code, former names, current officers — entity confirmation for step 1. **The register has no email or phone, so it never creates a channel.** Open Government Licence; source label always written. |
 | US SEC EDGAR | none | Legal name, CIK, SIC industry, former names, latest filing. EDGAR does not list officers (that lives inside each filing), so no names are guessed. |
 
 Countries without a free register (Vietnam included) get an explicit "no register available for this country" reason rather than a substitute source. `--no-secondary`, or `secondary: false` over HTTP, disables the step entirely.
+
+Before buying a key, `npm run search:check` calls **the same request the connector builds** (same `buildSearchRequest`/`parseSearchHits`) against a public domain, so "the key works" is measured rather than assumed — and with no key it prints the three providers, their free tiers and the two lines to add to `.env.local`, then exits 0, because running without step 3 is a normal state.
 
 ### Connector: findings go into the buyer tables
 

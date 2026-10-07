@@ -579,13 +579,28 @@ Không mặc định `false`, vì "chưa kiểm" khác "đã kiểm và không c
 
 Một dòng `channel_type = 'whatsapp'` là **kênh công bố sẵn** (link `wa.me` trên trang) — khác hẳn trường `has_whatsapp` (kết quả của một lần kiểm). Cả hai đều có chỗ và không lẫn nhau.
 
+### Vì sao chỗ kiểm vẫn còn trống — và cái gì thật sự cắm được (kiểm lại 07/10/2026)
+
+Người dùng hỏi có tích hợp luôn dịch vụ kiểm không. Câu trả lời ngắn: **có, nhưng phải chọn giữa một đường chính thức tốn tiền theo tin nhắn và một đường không chính thức có rủi ro khoá số.** Ba mươi phút tra lại tài liệu cho ra đúng bức tranh này:
+
+| Đường | Kiểm được trước khi gửi? | Chi phí | Rủi ro |
+| --- | --- | --- | --- |
+| **Meta WhatsApp Cloud API — endpoint `/contacts`** | Có, nếu endpoint tồn tại với tài khoản của mình | Theo tin nhắn/hội thoại của Cloud API | Không rủi ro khoá; nhưng **không có tài liệu chính thức**: URL `developers.facebook.com/docs/whatsapp/cloud-api/reference/contacts/` trả 404, còn báo cáo cộng đồng (02/2026) dùng `POST /{phone_number_id}/contacts` với `contacts` + `force_check`. Đường này **phải tự thử với tài khoản thật** trước khi tin |
+| **Gửi một template rồi đọc trạng thái** (Cloud API chính thức) | Không phải "kiểm" — gửi thật rồi đọc webhook: `sent` nghĩa là số có WhatsApp, `delivered` nghĩa là máy đã nhận; mã `131026` là nhóm "số xấu" nhưng nhiễu | Mỗi lần kiểm là **một tin nhắn thật**, trả tiền theo tin | Không rủi ro kỹ thuật, nhưng phải có cơ sở liên hệ (opt-in) và đúng loại template — không thể dùng làm máy quét hàng loạt |
+| **Twilio** | **Không.** Twilio không có API kiểm số có WhatsApp; tài liệu của họ (25/09/2026) tự chỉ người dùng mở `wa.me/<số>` bằng tay, hoặc đọc Error Logs | — | — |
+| **Gateway không chính thức** (Green API `checkWhatsapp`, Whapi.Cloud, các dịch vụ "bulk checker") | Có, theo lô | Green API từ ~12 USD/tháng/instance; hạn mức `checkWhatsapp` 100 lượt/tháng ở gói Developer, 30.000 ở gói Business | **Trái điều khoản của Meta.** Các gateway này chạy qua một phiên WhatsApp Web đã đăng nhập; số dùng để kiểm **có thể bị khoá**, và dịch vụ bên thứ ba đọc được danh sách số mình đưa vào |
+
+Ghi chú đã bỏ đi một điều sai từng được lặp lại: **On-Premises API từng có `/contacts` để kiểm trước, Cloud API bỏ nó** — nhưng không phải "Meta không có cách nào": vẫn còn đường gửi-thật-đọc-trạng-thái, và endpoint `/contacts` có dấu vết trở lại trên Cloud API qua báo cáo cộng đồng (chưa có tài liệu chính thức).
+
+**Điều đáng nói nhất về chi phí:** Twilio ghi rõ WhatsApp **không tính tiền cho tin nhắn gửi tới số không tồn tại** — nên "gửi thật rồi đọc trạng thái" rẻ hơn vẻ ngoài của nó, nhưng vẫn là một tin nhắn thật tới người thật, kèm nghĩa vụ opt-in.
+
 ### Nút WhatsApp trên UI
 
 `public.contact_whatsapp_links` (008) chỉ trả những số **đã kiểm là có WhatsApp**, kèm `whatsapp_url = 'https://wa.me/' || <số không dấu +>`. Danh sách buyer đọc view này và hiện nút "Nhắn WhatsApp"; số chưa kiểm thì không có nút, không có suy đoán. View rỗng khi chưa cắm dịch vụ kiểm — và đó là trạng thái đúng.
 
 ### Kiểm chứng
 
-- `npm run connector:test` — 120 check, thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
+- `npm run connector:test` — 192 check ở vòng 012 (120 ở vòng này), thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
 - `npm run persist:test` — 63 check: E.164 được lưu đúng, `has_whatsapp` là `null` sau khi connector ghi, view WhatsApp trống khi chưa kiểm, rồi mô phỏng kết quả kiểm → view trả `https://wa.me/17074522800`, và hai ràng buộc mới bị database từ chối thi hành.
 
 ---
@@ -713,6 +728,18 @@ Nhóm nghề đọc từ chính chữ đã công bố: chức danh đi kèm, nh�
 
 **1. Search API** (tuỳ chọn, `SEARCH_API_KEY` — Serper / Tavily / Brave). Câu truy vấn **luôn** có `site:<tên miền công ty>`, nên phạm vi vẫn là website của họ; search chỉ có nhiệm vụ chỉ đường tới những trang mà sitemap và đường dẫn đoán trước bỏ sót. Kết quả ngoài tên miền bị loại ngay cả khi nhà cung cấp search trả về (đã có hàng rào thứ hai). **Snippet của search không bao giờ là bằng chứng** — bằng chứng vẫn phải là câu chữ trên trang mà chính hệ thống mở ra. Khoá gửi qua header, không nhét vào URL.
 
+**Google và Bing không còn là lựa chọn (kiểm lại 07/10/2026).** Người dùng hỏi có cắm Google/Bing Search API được không. Câu trả lời là không, vì cả hai đã đóng với khách mới:
+
+- **Bing Search API (gồm cả Custom Search) đã bị khai tử ngày 11/08/2025** — Microsoft thông báo toàn bộ instance cũ bị ngừng và không nhận khách mới; thứ thay thế ("Grounding with Bing Search") là một tính năng của Azure AI Agents, không phải search API trả về danh sách URL, nên không cắm vào pipeline này được.
+- **Google Programmable Search (Custom Search JSON API) đã đóng với khách mới** và có lịch ngừng hẳn **01/01/2027**; mức giá công bố cho khách cũ là 100 câu/ngày miễn phí rồi 5 USD/1.000 câu, trần 10.000 câu/ngày. Xây vào một API đang chết là tự tạo việc phải đổi lần nữa.
+
+Vì vậy ba nhà cung cấp ở trên là đường còn sống, và **đổi nhà cung cấp không cần sửa code**: `buildSearchRequest` + `parseSearchHits` biết hình dạng request/kết quả của cả ba (Serper: POST + `x-api-key`; Tavily: POST + khoá trong body; Brave: GET + `x-subscription-token`), có test cho từng cái.
+
+**`npm run search:check`** gọi **đúng request mà connector dựng** (cùng hai hàm đó) tới một tên miền công khai để trả lời "khoá có chạy không" bằng phép đo, không bằng niềm tin. Không có khoá: in ra ba nhà cung cấp kèm gói miễn phí và hai dòng cần thêm vào `.env.local`, rồi thoát 0 — vì chạy thiếu bước 3 là trạng thái bình thường. Có khoá mà lỗi (401/403/429/mạng): thoát 1 kèm lý do.
+
+Gói miễn phí để bắt đầu, theo công bố của chính các nhà cung cấp (09/2026): Serper ~2.500 câu thử rồi ~1 USD/1.000 câu; Tavily 1.000 credit/tháng; Brave 5 USD credit/tháng (~1.000 câu, tức về sau 5 USD/1.000 câu). **Serper rẻ nhất nhưng không phải index độc lập** — nó trả kết quả Google; Brave có index riêng. Với cùng một lớp chỉ-dùng-URL, cả ba đều đủ.
+
+
 **2. Sổ đăng ký doanh nghiệp** — trả lời câu hỏi của bước 1: *có đúng công ty này không*.
 
 | Sổ | Quốc gia | Lấy được | Điều kiện |
@@ -741,7 +768,7 @@ Với `SEARCH_API_KEY` / `SEARCH_PROVIDER` / `COMPANIES_HOUSE_API_KEY` đặt tr
 
 ### Kiểm chứng
 
-`npm run connector:test` — **182 check** (trước vòng này là 120): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
+`npm run connector:test` — **192 check** ở vòng 012 (182 ở vòng này, 120 trước đó): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá, hình dạng request/kết quả của cả ba nhà cung cấp, kết quả hỏng bị bỏ), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
 
 ### Kèm theo: `info@` không còn bị xếp là email bộ phận
 
