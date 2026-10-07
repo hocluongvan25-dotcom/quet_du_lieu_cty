@@ -53,6 +53,58 @@ Lý do không nới quy tắc: số E.164 là thứ mở `wa.me/<số>`. Một m
 
 ---
 
+## 2. Kết quả đối chiếu sổ đăng ký chưa được lưu vào DB
+
+**Phát sinh:** 07/10/2026, khi cắm bước 3 (nguồn cấp 2) — spec §22.
+
+Bước 1 của thiết kế chuẩn là "biết đang đọc website của ai". Từ hôm nay hệ thống
+**tra được** sổ đăng ký (UK Companies House, US SEC EDGAR) và trả về tên pháp
+nhân, số đăng ký, tình trạng, ngành, tên cũ và người đương nhiệm — nhưng kết quả
+đó chỉ nằm trong JSON trả về và trên CLI, **chưa có chỗ trong database**, nên
+chưa hiện được trong danh sách buyer.
+
+Còn thiếu:
+
+- migration **011**: một chỗ để lưu lần đối chiếu pháp nhân (nguồn, số đăng ký,
+  tình trạng, thời điểm tra, người đương nhiệm kèm chức danh) — gắn với
+  `buyer_profiles` hay một bảng riêng, và ghi theo `market_sources` như mọi nguồn khác.
+- `persist.ts` ghi kết quả đó khi có; `buyer-view.ts` + trang buyer đọc ra.
+- Quy tắc hiển thị: người đương nhiệm từ sổ đăng ký **không phải kênh liên hệ**
+  (sổ không có email/điện thoại) — hiện dưới dạng "đối chiếu pháp nhân", không
+  lẫn vào danh sách kênh.
+
+Điều kiện để làm: không cần gì thêm ngoài một migration — dữ liệu đã có sẵn trong
+`ConnectorResult.registry`.
+
+---
+
+## 3. Hội chợ / hiệp hội ngành (nguồn cấp 2, phần còn lại)
+
+**Phát sinh:** 07/10/2026, spec §22.
+
+Thiết kế chuẩn kể tên "licensed B2B/trade-show directories" trong bước 3. Chưa
+cắm, vì phải có **nguồn thật để đọc trước** (trang hội chợ có danh sách nhà triển
+lãm công khai, hiệp hội ngành công bố danh sách hội viên) và phải kiểm điều khoản
+của từng nguồn trước khi lưu — như luật đã có từ đầu dự án: không nguồn nào được
+lưu nếu chưa có dòng trong `market_sources`.
+
+Việc cần làm trước khi cắm: chọn 2–3 hội chợ/hiệp hội ngành thực phẩm & nông sản
+(có cả Việt Nam), đọc điều khoản, ghi vào `market_sources` kèm `licence_type` và
+`allows_resale`, rồi mới viết connector đọc chúng.
+
+---
+
+## 4. `shipper_role` — vai của bên Việt Nam trên tờ khai
+
+**Phát sinh:** trong danh sách việc của vòng 10, chưa làm.
+
+Tờ khai hải quan Mỹ có nhiều bên (importer, consignee, shipper, notify party).
+Cần một trường nói rõ **bên Việt Nam đang là vai nào** trước khi coi họ là khách
+hàng hay là nhà cung cấp — nếu không thì mọi kết luận về sau đều dựa trên một
+phỏng đoán về việc ai là ai. Việc này phụ thuộc dữ liệu hải quan (mục ngân sách).
+
+---
+
 ## Chưa ghi vào backlog
 
 Những việc đang dở nhưng đã nằm trong tài liệu khác thì không lặp lại ở đây:

@@ -683,3 +683,71 @@ Dòng dữ liệu **không bị xoá** khi kênh hết hạn — lịch sử là
 ### Kiểm chứng
 
 `npm run reverify:test` — **37 check**, hai phần: (1) so khớp và ba câu trả lời, gồm ca `unreachable` vì HTTP 500 và vì trang đăng nhập; (2) trên Postgres thật (10 migration): hàng đợi chọn đúng kênh (bỏ kênh mua dữ liệu và kênh đã chết), `still_present` làm mới, `gone` hạ kênh khỏi danh sách xuất **nhưng dòng vẫn còn**, `unreachable` không đổi gì, và hai ràng buộc của sổ đọc lại từ chối thi hành.
+
+## 22. Nguồn cấp 2 — bước 3 của thiết kế chuẩn (07/10/2026)
+
+Bước 1 (biết đang đọc website của ai) và bước 2 (đọc thẳng nguồn của công ty) đã có từ trước. Đây là bước 3, và nó có một luật duy nhất: **chỉ chạy khi cần**.
+
+### Thêm một tầng giữa bước 2 và bước 3: sitemap
+
+Trước khi đi ra ngoài, có một nguồn vẫn thuộc về công ty mà hệ thống chưa dùng: **sitemap**. Danh sách đường dẫn đoán trước (`/contact`, `/suppliers`, `/vendor`…) bỏ sót đúng những trang đáng giá nhất, vì trang mua hàng hay đặt tên không đoán được: `/vi/doi-tac-cung-ung`, `/en/partners/become-vendor`, `/supplier-quality-hub`.
+
+Sitemap là **bản đồ công ty tự công bố về website của mình**, nên nó tốt hơn mọi nguồn cấp 2 ở mọi mặt: không cần khoá, không có bên thứ ba phải tin, không thêm lượt gọi nào ra ngoài tên miền. Vì vậy nó được đọc **trong bước 2**, song song với trang chủ (`src/lib/connector/sitemap.ts`).
+
+Giới hạn có chủ ý: chỉ cùng tên miền; chỉ nhận URL khớp từ khoá (supplier/vendor/procurement/sourcing/contact/about/quality/certificat/tender/rfq…); sitemap index thì đọc file con **trước** những đường dẫn gốc còn lại (file con mới là bản đồ thật); trần 3 file; và **đã đọc được một bản đồ dùng được thì dừng**, không thử thêm đường dẫn gốc khác — mỗi lượt thử là một yêu cầu gửi tới máy chủ của họ. Sitemap cũng phải qua `robots.txt` như mọi URL khác.
+
+### Cổng quyết định (`src/lib/connector/gate.ts`)
+
+"Cần" phải kiểm được, không phải cảm giác:
+
+| Tình trạng sau bước 2 | Đi tiếp? |
+| --- | --- |
+| Đã có kênh thuộc **nhóm mua hàng** (procurement / purchasing / sourcing / supply chain) | **Không** — đã tới đúng cửa |
+| Chỉ có `info@`, tổng đài, biểu mẫu liên hệ | **Có** — kênh chung không phải cửa vào phòng mua hàng |
+| Chỉ có người ngoài nhóm mua hàng (ví dụ giám đốc kinh doanh) | **Có** — có tên người thì còn tra được chức danh thật |
+| Không có kênh nào | **Có** |
+
+Nhóm nghề đọc từ chính chữ đã công bố: chức danh đi kèm, nhãn của kênh, và với email thì cả **local part** (`procurement@` là chữ in trên trang, không phải suy đoán). Hàm này thuần, kiểm được không cần mạng.
+
+### Hai nguồn được cắm
+
+**1. Search API** (tuỳ chọn, `SEARCH_API_KEY` — Serper / Tavily / Brave). Câu truy vấn **luôn** có `site:<tên miền công ty>`, nên phạm vi vẫn là website của họ; search chỉ có nhiệm vụ chỉ đường tới những trang mà sitemap và đường dẫn đoán trước bỏ sót. Kết quả ngoài tên miền bị loại ngay cả khi nhà cung cấp search trả về (đã có hàng rào thứ hai). **Snippet của search không bao giờ là bằng chứng** — bằng chứng vẫn phải là câu chữ trên trang mà chính hệ thống mở ra. Khoá gửi qua header, không nhét vào URL.
+
+**2. Sổ đăng ký doanh nghiệp** — trả lời câu hỏi của bước 1: *có đúng công ty này không*.
+
+| Sổ | Quốc gia | Lấy được | Điều kiện |
+| --- | --- | --- | --- |
+| UK Companies House | Anh | tên pháp nhân, số đăng ký, tình trạng, ngày thành lập, mã SIC, tên cũ, **người đương nhiệm** | API miễn phí; dữ liệu mở theo OGL, được dùng thương mại **khi ghi nguồn** (nhãn nguồn luôn được ghi) |
+| US SEC EDGAR | Mỹ | tên pháp nhân, mã CIK, ngành theo SIC, tên cũ, hồ sơ gần nhất | hồ sơ công khai; phải gửi User-Agent nhận diện được |
+
+Hai điều cố ý:
+
+- **Sổ đăng ký không tạo ra kênh liên hệ nào.** Sổ không có email, không có điện thoại. Vì vậy kết quả của sổ đi vào một khối riêng (`ConnectorResult.registry`) — tên người kèm chức danh và nguồn, không bao giờ thành một dòng trong danh sách kênh. (`test-connector` kiểm đúng điều này.)
+- **EDGAR không trả về danh sách người.** Tên và chức danh người ký nằm *bên trong* từng hồ sơ; đọc ra là việc nặng hơn và dễ gán nhầm một cái tên cho một công ty. Thà thiếu.
+- Quốc gia chưa có sổ miễn phí (trong đó có **Việt Nam**) thì hệ thống nói thẳng là chưa có sổ, **không** lấy nguồn khác thay thế. Sổ Anh/Mỹ chỉ được tra khi quốc gia của công ty là Anh/Mỹ.
+
+### Không có khoá thì không có gì xảy ra
+
+Bước 3 là tuỳ chọn. Không có `SEARCH_API_KEY` thì phần search không chạy; không có `COMPANIES_HOUSE_API_KEY` thì không tra sổ Anh; không có tên pháp nhân thì không tra sổ nào. Mỗi lần như vậy, `ConnectorResult.secondary.reason` nói rõ vì sao — người kiểm đọc được mà không phải đoán. `secondary: false` tắt hẳn. **Không có khoá nào đi vào mã nguồn**, tất cả đọc từ biến môi trường phía server.
+
+### Chạy thế nào
+
+```bash
+npm run connector:run acmespices.co.uk -- --company "Acme Spices Ltd" --country "United Kingdom"
+npm run connector:run acmespices.co.uk -- --no-secondary      # chỉ đọc website công ty
+```
+
+Với `SEARCH_API_KEY` / `SEARCH_PROVIDER` / `COMPANIES_HOUSE_API_KEY` đặt trong môi trường. `/api/connector` cũng truyền các khoá này (đọc từ `process.env`, **không** nhận từ body request) và trả thêm `registry` + `secondary` trong JSON.
+
+### Kiểm chứng
+
+`npm run connector:test` — **182 check** (trước vòng này là 120): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
+
+### Kèm theo: `info@` không còn bị xếp là email bộ phận
+
+Trước vòng này `DEPARTMENT_LOCALS` gộp cả hộp thư chung (`info`, `hello`, `contact`, `sales`…) lẫn hộp thư bộ phận (`procurement`, `accounts`, `hr`…) vào một nhóm, nên `info@` hiện lên ở khối "Email bộ phận". Đã tách thành hai nhóm: hộp thư chung của công ty (`GENERAL_LOCALS`) và hộp thư bộ phận. Chưa rõ thì mặc định là **hộp thư chung** — hướng an toàn, không gán một hộp thư chung cho một bộ phận nào khi trang không nói vậy.
+
+### Còn lại của bước 3
+
+- **Hội chợ / hiệp hội ngành**: chưa cắm, và sẽ chỉ cắm khi có nguồn thật để đọc (xem `docs/backlog.md`).
+- **Kết quả sổ đăng ký chưa được lưu vào DB**: hiện đi kèm JSON trả về và hiện trên CLI, chưa có bảng/cột để hiển thị trong danh sách buyer. Việc này cần migration 011 — ghi trong `docs/backlog.md`.

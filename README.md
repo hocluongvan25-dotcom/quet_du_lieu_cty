@@ -222,6 +222,8 @@ Beyond HTML pages, the connector reads **same-domain PDFs** — annual reports, 
 
 ```bash
 npm run connector:run mariani.com -- --max-pages 8 --max-documents 4
+npm run connector:run acmespices.co.uk -- --company "Acme Spices Ltd" --country "United Kingdom"
+npm run connector:run acmespices.co.uk -- --no-secondary   # company site only
 ```
 
 ### Connector: public pages to sourced channels
@@ -236,15 +238,28 @@ npm run connector:run mariani.com -- --max-pages 8 --max-documents 4
 | `fetch.ts` | One page fetch with timeout, size cap, login-wall and block detection |
 | `safety.ts` | SSRF guard: loopback, private ranges, link-local/metadata IPs, `.internal`, non-http schemes |
 | `discover.ts` | Page selection: contact/supplier/about pages, same domain, robots-respecting |
-| `index.ts` | `runConnector(domain)` orchestration |
+| `sitemap.ts` | Reads the company's own sitemap(s): finds supplier pages whose names cannot be guessed |
+| `gate.ts` | Decides whether step 3 is needed at all (pure: is there a buying-role channel yet?) |
+| `secondary.ts` | Step 3 sources: scoped search API, UK Companies House, US SEC EDGAR |
+| `index.ts` | `runConnector(domain)` orchestration (steps 2 and 3) |
 | `to-report.ts` | Maps results onto the frozen report shape |
 | `persist.ts` | Builds the database rows (pure) and writes them through a small store port: `buyer_profiles`, `decision_makers`, `contact_channels`, `buyer_routes` |
 
 ```bash
-npm run connector:test    # 120 checks on real HTML and PDF fixtures, no network needed
+npm run connector:test    # 182 checks on real HTML and PDF fixtures, no network needed
 npm run connector:run mariani.com            # real run, human readable
 npm run connector:run mariani.com -- --json  # full JSON
 ```
+
+**Step 3 (secondary sources) only runs when step 2 came up thin** — i.e. when reading the company's own site (including its sitemap and same-domain PDFs) did not reach a channel that belongs to a buying role (procurement / purchasing / sourcing / supply chain). It is opt-in through server-side environment variables, and each of its three sources is independently optional:
+
+| Source | Key | What it can add — and what it never adds |
+| --- | --- | --- |
+| Search API (Serper / Tavily / Brave) | `SEARCH_API_KEY`, `SEARCH_PROVIDER` | **URLs inside the company domain** (`site:` is always in the query). Search snippets are never evidence; the page is fetched and quoted as usual. Off-domain hits are dropped twice. |
+| UK Companies House | `COMPANIES_HOUSE_API_KEY` | Legal name, company number, status, incorporation date, SIC code, former names, current officers — entity confirmation for step 1. **The register has no email or phone, so it never creates a channel.** Open Government Licence; source label always written. |
+| US SEC EDGAR | none | Legal name, CIK, SIC industry, former names, latest filing. EDGAR does not list officers (that lives inside each filing), so no names are guessed. |
+
+Countries without a free register (Vietnam included) get an explicit "no register available for this country" reason rather than a substitute source. `--no-secondary`, or `secondary: false` over HTTP, disables the step entirely.
 
 ### Connector: findings go into the buyer tables
 

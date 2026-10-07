@@ -19,13 +19,26 @@ const EMAIL_RE = /[A-Za-z0-9._%+'\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
  */
 const PHONE_RE = /(?:\+|00)?\d[\d\s().\-]{6,20}\d/g;
 
+/**
+ * Local part của **hộp thư chung của công ty**: cả công ty dùng chung một hộp,
+ * không phải của riêng bộ phận nào. Trên báo cáo, những hộp này thuộc khối "kênh
+ * chung của công ty" (khối trên), không thuộc khối "Email bộ phận".
+ *
+ * `info@` từng bị xếp vào khối bộ phận vì trước đây hai nhóm gộp làm một — sai,
+ * và làm hộp thư chung hiện lên như một cửa riêng của bộ phận.
+ */
+const GENERAL_LOCALS = new Set([
+  "info", "hello", "contact", "contactus", "general", "mail", "team", "office", "cs", "help",
+  "support", "service", "customerservice", "admin", "orders", "order", "shop", "store", "welcome",
+  "enquiries", "enquiry", "inquiries", "inquiry",
+]);
+
 /** Local part của email bộ phận — không phải của một cá nhân. */
 const DEPARTMENT_LOCALS = new Set([
-  "info", "hello", "contact", "contactus", "sales", "support", "service", "customerservice", "cs", "help",
-  "orders", "order", "admin", "office", "hr", "jobs", "careers", "marketing", "press", "media", "pr",
+  "sales", "hr", "jobs", "careers", "marketing", "press", "media", "pr",
   "procurement", "purchasing", "sourcing", "suppliers", "vendor", "vendors", "ingredients", "export",
   "exports", "import", "imports", "wholesale", "b2b", "accounts", "accounting", "billing", "finance",
-  "enquiries", "enquiry", "inquiries", "inquiry", "general", "team", "mail", "shop", "store",
+  "logistics", "quality", "qa", "qc",
 ]);
 
 /** Giá trị trông giống email nhưng là tên file hoặc email hệ thống. */
@@ -67,11 +80,18 @@ function digitCount(value: string): number {
   return (value.match(/\d/g) ?? []).length;
 }
 
-/** Bộ phận hay cá nhân? Chỉ dựa vào chính local part, không phán bừa. */
+/**
+ * Hộp thư chung của công ty, của một bộ phận, hay chưa rõ? Chỉ dựa vào chính local
+ * part đã công bố, không suy từ tên miền, không đoán theo pattern tên người.
+ *
+ * Chưa rõ thì mặc định là `company_general` — hướng an toàn: không gán một hộp
+ * thư chung cho một bộ phận nào khi trang không nói vậy.
+ */
 export function classifyEmailLocal(local: string): IdentityMatch {
   const key = local.toLowerCase().replace(/[._-]/g, "");
-  if (DEPARTMENT_LOCALS.has(key)) return "department";
-  if (DEPARTMENT_LOCALS.has(local.toLowerCase())) return "department";
+  const lower = local.toLowerCase();
+  if (GENERAL_LOCALS.has(key) || GENERAL_LOCALS.has(lower)) return "company_general";
+  if (DEPARTMENT_LOCALS.has(key) || DEPARTMENT_LOCALS.has(lower)) return "department";
   return "company_general";
 }
 

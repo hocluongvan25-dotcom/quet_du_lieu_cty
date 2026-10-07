@@ -125,7 +125,21 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await runConnector(seed, { maxPages, delayMs: 250, targets, country });
+    // Bước 3 (nguồn cấp 2) tự chạy khi bước 2 chưa tới được cửa mua hàng, và chỉ
+    // khi có khoá. Khoá nằm ở biến môi trường phía server, không bao giờ nhận từ
+    // body của request.
+    const result = await runConnector(seed, {
+      maxPages,
+      delayMs: 250,
+      targets,
+      country,
+      companyName,
+      secondary: {
+        searchApiKey: process.env.SEARCH_API_KEY,
+        searchProvider: process.env.SEARCH_PROVIDER as "serper" | "tavily" | "brave" | undefined,
+        companiesHouseApiKey: process.env.COMPANIES_HOUSE_API_KEY,
+      },
+    });
 
     const attempted = result.pages.filter((page) => page.status !== "skipped");
     if (attempted.length > 0 && result.channels.length === 0 && attempted.every((page) => page.status === "error" || page.status === "blocked")) {
@@ -147,6 +161,10 @@ export async function POST(request: Request) {
       people: resultToPeople(result),
       notes: resultToNotes(result),
       pages: result.pages,
+      // Bước 1 (đúng công ty chưa?) và nhật ký bước 3 — người dùng chỉ thấy thứ
+      // tìm được; đây là phần để người kiểm đọc lại.
+      registry: result.registry ?? null,
+      secondary: result.secondary ?? null,
       raw: { channels: result.channels, notes: result.notes },
       persisted: storage.persisted,
       persist: storage,

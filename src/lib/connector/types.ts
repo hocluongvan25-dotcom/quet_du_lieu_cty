@@ -40,6 +40,9 @@ export type FoundPerson = {
 };
 
 import type { Requirement } from "@/lib/requirements";
+import type { RegistryFinding } from "./secondary";
+
+export type { RegistryFinding };
 
 export type ConnectorNote = {
   kind: "not_found" | "excluded" | "skipped";
@@ -57,6 +60,24 @@ export type PageReport = {
   kind?: "html" | "pdf";
 };
 
+/**
+ * Báo cáo bước 3 — nguồn cấp 2. Ghi lại **có chạy hay không và vì sao**, để
+ * người kiểm đọc được lý do mà không phải đoán. Không hiện cho người dùng cuối:
+ * người dùng chỉ thấy thứ tìm được (spec §9).
+ */
+export type SecondaryReport = {
+  /** Có gọi ra ngoài website công ty không. */
+  ran: boolean;
+  /** Vì sao chạy, hoặc vì sao không chạy. */
+  reason: string;
+  /** Có dùng search API không: tên nhà cung cấp, số truy vấn, số URL thu được. */
+  search?: { provider: string; queries: number; urls: number; documents: number };
+  /** Sổ đăng ký đã hỏi (kể cả khi không ra kết quả). */
+  registriesQueried: string[];
+  /** Vì sao sổ đăng ký không cho kết quả — nếu vậy. */
+  registryReason?: string;
+};
+
 export type ConnectorResult = {
   seedUrl: string;
   domain: string;
@@ -65,6 +86,10 @@ export type ConnectorResult = {
   people: FoundPerson[];
   /** Yêu cầu/giấy tờ nhà nhập khẩu công bố đối với nhà cung cấp, kèm câu chữ gốc. */
   requirements: Requirement[];
+  /** Sổ đăng ký doanh nghiệp đã đối chiếu — chỉ có khi tra được và có kết quả. */
+  registry?: RegistryFinding;
+  /** Nhật ký nguồn cấp 2: có chạy không, vì sao, đã hỏi những đâu. */
+  secondary?: SecondaryReport;
   notes: ConnectorNote[];
   /** Số trang đã tải thực tế. */
   pagesFetched: number;

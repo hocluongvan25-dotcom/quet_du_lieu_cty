@@ -11,6 +11,16 @@
  * không giải CAPTCHA, và không sinh email theo pattern.
  *
  *   npm run connector:run mariani.com -- --max-documents 4
+ *
+ * Bước 3 (nguồn cấp 2) tự chạy khi bước 2 chưa tới được cửa mua hàng. Cấu hình
+ * bằng biến môi trường, không truyền qua tham số dòng lệnh:
+ *
+ *   SEARCH_API_KEY=...            # Serper / Tavily / Brave (chỉ để tìm URL cùng tên miền)
+ *   SEARCH_PROVIDER=serper        # tuỳ chọn: serper | tavily | brave
+ *   COMPANIES_HOUSE_API_KEY=...   # sổ đăng ký Anh (miễn phí, dữ liệu mở OGL)
+ *
+ *   npm run connector:run acmespices.co.uk -- --company "Acme Spices Ltd" --country "United Kingdom"
+ *   npm run connector:run acmespices.co.uk -- --no-secondary   # chỉ đọc website công ty
  */
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
@@ -21,7 +31,7 @@ const root = process.cwd();
 const workDir = path.join(root, ".connector-test");
 
 function parseArgs(argv) {
-  const args = { seed: "", json: false, maxPages: 6, maxDocuments: 3, delayMs: 400, targets: undefined };
+  const args = { seed: "", json: false, maxPages: 6, maxDocuments: 3, delayMs: 400, targets: undefined, company: "", country: "", secondary: true };
   const rest = [];
   for (let i = 0; i < argv.length; i += 1) {
     const value = argv[i];
@@ -30,6 +40,9 @@ function parseArgs(argv) {
     else if (value === "--max-documents") args.maxDocuments = Number(argv[++i]) || 3;
     else if (value === "--delay") args.delayMs = Number(argv[++i]) || 0;
     else if (value === "--targets") args.targets = String(argv[++i] ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+    else if (value === "--company") args.company = String(argv[++i] ?? "");
+    else if (value === "--country") args.country = String(argv[++i] ?? "");
+    else if (value === "--no-secondary") args.secondary = false;
     else if (value === "--") continue;
     else if (!value.startsWith("--")) rest.push(value);
   }
@@ -77,6 +90,15 @@ export const runConnectorFn = runConnector;
     maxDocuments: args.maxDocuments,
     delayMs: args.delayMs,
     targets: args.targets,
+    companyName: args.company,
+    country: args.country,
+    secondary: args.secondary
+      ? {
+          searchApiKey: process.env.SEARCH_API_KEY,
+          searchProvider: process.env.SEARCH_PROVIDER,
+          companiesHouseApiKey: process.env.COMPANIES_HOUSE_API_KEY,
+        }
+      : false,
     log: args.json ? () => {} : (message) => console.error(`· ${message}`),
   });
 
@@ -98,6 +120,31 @@ export const runConnectorFn = runConnector;
     console.log(`      nguồn: ${channel.sourceUrl}`);
     console.log(`      thấy ở: "${channel.evidenceSnippet}"`);
   });
+
+  if (result.registry) {
+    const registry = result.registry;
+    console.log("\nĐỐI CHIẾU SỔ ĐĂNG KÝ (bước 1 — có đúng công ty này không):");
+    console.log(`  ${registry.registryLabel}: ${registry.registeredName ?? "(không rõ tên)"}${registry.companyNumber ? ` — ${registry.companyNumber}` : ""}`);
+    if (registry.status) console.log(`      tình trạng: ${registry.status}`);
+    if (registry.incorporatedOn) console.log(`      thành lập: ${registry.incorporatedOn}`);
+    if (registry.industry) console.log(`      ngành: ${registry.industry}`);
+    if (registry.formerNames?.length) console.log(`      tên cũ: ${registry.formerNames.join(", ")}`);
+    console.log(`      nguồn: ${registry.sourceUrl}`);
+    if (registry.officers.length > 0) {
+      console.log(`      người đương nhiệm (${registry.officers.length}, sổ không có email/điện thoại):`);
+      registry.officers.slice(0, 10).forEach((officer) => {
+        console.log(`        • ${officer.name} — ${officer.role}${officer.appointedOn ? ` (từ ${officer.appointedOn})` : ""}`);
+      });
+    }
+  }
+
+  if (result.secondary?.ran) {
+    console.log("\nNGUỒN CẤP 2 ĐÃ DÙNG:");
+    console.log(`  lý do: ${result.secondary.reason}`);
+    if (result.secondary.search) console.log(`  search (${result.secondary.search.provider}): ${result.secondary.search.queries} truy vấn → ${result.secondary.search.urls} trang, ${result.secondary.search.documents} tài liệu`);
+    if (result.secondary.registriesQueried.length > 0) console.log(`  sổ đăng ký đã hỏi: ${result.secondary.registriesQueried.join(", ")}`);
+    if (result.secondary.registryReason) console.log(`  sổ đăng ký không cho kết quả: ${result.secondary.registryReason}`);
+  }
 
   if (result.people.length > 0) {
     console.log("\nNGƯỜI TÌM ĐƯỢC:");

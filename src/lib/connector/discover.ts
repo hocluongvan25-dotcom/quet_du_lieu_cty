@@ -7,6 +7,7 @@
 import { fetchPage, type FetchOutcome } from "./fetch";
 import { registrableDomain } from "./html";
 import { isPathAllowed, parseRobots, type RobotsRules } from "./robots";
+import { readSitemap } from "./sitemap";
 
 /** Trang thường chứa thông tin liên hệ, xếp theo mức liên quan. */
 const LINK_KEYWORDS: { pattern: RegExp; score: number }[] = [
@@ -155,7 +156,16 @@ export type DiscoveryPlan = {
   documents: string[];
   skipped: { url: string; reason: string }[];
   robotsFound: boolean;
+  /** Luật robots.txt đã đọc — bước 3 dùng lại để kiểm URL mới, không đọc lại. */
+  robots: RobotsRules;
   homePage?: FetchOutcome;
+  /**
+   * Đã đọc được sitemap của công ty chưa. Sitemap là bản đồ công ty **tự công bố**,
+   * dùng để tìm những trang mua hàng không đoán được tên (`/vi/doi-tac-cung-ung`).
+   */
+  sitemapFound: boolean;
+  /** Số URL lấy được từ sitemap (đã lọc theo từ khoá, cùng tên miền). */
+  sitemapUrls: number;
 };
 
 export type DiscoveryOptions = {
@@ -164,6 +174,7 @@ export type DiscoveryOptions = {
   maxDocuments?: number;
   userAgent?: string;
   extraUrls?: string[];
+  maxSitemaps?: number;
   log?: (message: string) => void;
   /** Chốt an toàn SSRF; mặc định là assertPublicUrl, test truyền hàm rỗng. */
   guard?: (url: string) => Promise<unknown>;
@@ -199,7 +210,26 @@ export async function planDiscovery(seedUrl: string, options: DiscoveryOptions =
   }
 
   const homeUrl = `${origin}/`;
-  const homeOutcome = await fetchPage(homeUrl, { fetchImpl: options.fetchImpl, userAgent: options.userAgent, guard: options.guard });
+  // Sitemap đọc song song với trang chủ: cả hai đều là "công ty tự công bố", và
+  // sitemap chứa những trang mua hàng mà danh sách đường dẫn đoán trước bỏ sót.
+  const [homeOutcome, sitemap] = await Promise.all([
+    fetchPage(homeUrl, { fetchImpl: options.fetchImpl, userAgent: options.userAgent, guard: options.guard }),
+    readSitemap(seedUrl, {
+      fetchImpl: options.fetchImpl,
+      userAgent: options.userAgent,
+      guard: options.guard,
+      log,
+      maxSitemaps: options.maxSitemaps ?? 3,
+      // Sitemap cũng phải tôn trọng robots.txt như mọi URL khác.
+      allowed: (url) => {
+        try {
+          return isPathAllowed(robots, new URL(url).pathname);
+        } catch {
+          return false;
+        }
+      },
+    }),
+  ]);
   let homePage: FetchOutcome | undefined;
 
   if (homeOutcome.ok) {
@@ -208,6 +238,14 @@ export async function planDiscovery(seedUrl: string, options: DiscoveryOptions =
   } else {
     skipped.push({ url: homeUrl, reason: homeOutcome.reason ?? "không tải được" });
     log(`trang chủ: không tải được (${homeOutcome.reason ?? "không rõ"})`);
+  }
+
+  // URL từ sitemap: điểm sàn 50 để hơn đường dẫn đoán mò (40) nhưng không hơn
+  // link có ngữ cảnh trên trang chủ. Điểm thật vẫn theo từ khoá trong URL.
+  sitemap.urls.forEach((url) => queue.push({ url, score: Math.max(scoreLink(url, ""), 50), kind: "page" }));
+  sitemap.documents.forEach((url) => queue.push({ url, score: Math.max(scoreDocument(url, ""), 50), kind: "document" }));
+  if (sitemap.urls.length + sitemap.documents.length > 0) {
+    log(`sitemap: đưa vào hàng đợi ${sitemap.urls.length} trang + ${sitemap.documents.length} tài liệu`);
   }
 
   WELL_KNOWN_PATHS.forEach((path) => {
@@ -249,5 +287,14 @@ export async function planDiscovery(seedUrl: string, options: DiscoveryOptions =
   // Tài liệu bị giới hạn riêng và ít hơn: PDF nặng hơn trang HTML.
   const documents = pick("document", options.maxDocuments ?? 3);
 
-  return { urls, documents, skipped, robotsFound, homePage };
+  return {
+    urls,
+    documents,
+    skipped,
+    robotsFound,
+    robots,
+    homePage,
+    sitemapFound: sitemap.sitemapsRead.length > 0,
+    sitemapUrls: sitemap.urls.length + sitemap.documents.length,
+  };
 }

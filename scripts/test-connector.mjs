@@ -74,6 +74,13 @@ async function main() {
     "bulk-and-ingredients.html": await readFile(path.join(fixtures, "bulk-and-ingredients.html"), "utf8"),
     "home.html": await readFile(path.join(fixtures, "home.html"), "utf8"),
     "robots.txt": await readFile(path.join(fixtures, "robots.txt"), "utf8"),
+    "secondary/home.html": await readFile(path.join(fixtures, "secondary/home.html"), "utf8"),
+    "secondary/contact.html": await readFile(path.join(fixtures, "secondary/contact.html"), "utf8"),
+    "secondary/about.html": await readFile(path.join(fixtures, "secondary/about.html"), "utf8"),
+    "secondary/procurement.html": await readFile(path.join(fixtures, "secondary/procurement.html"), "utf8"),
+    "secondary/blocked-supplier.html": await readFile(path.join(fixtures, "secondary/blocked-supplier.html"), "utf8"),
+    "secondary/robots.txt": await readFile(path.join(fixtures, "secondary/robots.txt"), "utf8"),
+    "secondary/sitemap.xml": await readFile(path.join(fixtures, "secondary/sitemap.xml"), "utf8"),
     "supplier-guide.pdf": pdfPlain,
     "annual-report-2025.pdf": pdfCompressed,
     "quality-certification.pdf": pdfScanned,
@@ -91,8 +98,11 @@ import { pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString } from 
 import { extractFromLines } from "@/lib/connector/extract";
 import { buildBuyerWriteBatch } from "@/lib/connector/persist";
 import { toE164, whatsappLink, isE164, resolveCountry } from "@/lib/connector/phone";
+import { readSitemap } from "@/lib/connector/sitemap";
+import { coverageOf, secondaryReason } from "@/lib/connector/gate";
+import { searchSite, harvestUrlsFromSearch, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry } from "@/lib/connector/secondary";
 
-export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry };
+export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, searchSite, harvestUrlsFromSearch, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry };
 `;
   await mkdir(workDir, { recursive: true });
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
@@ -384,6 +394,320 @@ async function runChecks(api, files) {
   const withoutCountry = api.extractFromPage({ url: "https://mariani.com/pages/contact-us", html: files["contact-us.html"] });
   const phoneWithout = withoutCountry.channels.find((channel) => channel.type === "phone" && channel.value === "7074522800");
   check("trang không có quốc gia → e164 rỗng, kèm lý do", phoneWithout?.e164 === null && String(phoneWithout?.e164Reason).includes("quốc gia"), phoneWithout?.e164Reason);
+
+  // ------------------------------------------------------------- nguồn cấp 2 --
+  section("sitemap: bản đồ công ty tự công bố");
+
+  const xml = (body, status = 200) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    url: "https://acmespices.co.uk/sitemap.xml",
+    headers: { get: () => "application/xml" },
+    text: async () => body,
+    arrayBuffer: async () => Uint8Array.from(body, (c) => c.charCodeAt(0) & 0xff).buffer,
+  });
+
+  const sitemapFetch = async (url) => {
+    if (new URL(String(url)).pathname === "/sitemap.xml") return xml(files["secondary/sitemap.xml"]);
+    return xml("not found", 404);
+  };
+
+  const sitemapRead = await api.readSitemap("https://acmespices.co.uk", { fetchImpl: sitemapFetch, guard: noGuard, log: () => {} });
+  check("đọc được sitemap của công ty", sitemapRead.sitemapsRead.length === 1, sitemapRead.sitemapsRead.join(", "));
+  check("lấy trang liên quan trong sitemap", sitemapRead.urls.includes("https://acmespices.co.uk/about"), sitemapRead.urls.join(", "));
+  check("bỏ URL khác tên miền", !sitemapRead.urls.some((url) => url.includes("other-site.test")));
+  check("bỏ URL không liên quan (bài blog)", !sitemapRead.urls.some((url) => url.includes("/blog/")));
+  check("tách tài liệu PDF trong sitemap", sitemapRead.documents.includes("https://acmespices.co.uk/documents/supplier-guide.pdf"), sitemapRead.documents.join(", "));
+
+  const sitemapFiltered = await api.readSitemap("https://acmespices.co.uk", {
+    fetchImpl: sitemapFetch,
+    guard: noGuard,
+    log: () => {},
+    allowed: (url) => !url.includes("/blocked"),
+  });
+  check("chốt robots.txt được áp cho cả URL lấy từ sitemap", !sitemapFiltered.urls.some((url) => url.includes("/blocked")));
+
+  const noSitemapRead = await api.readSitemap("https://acmespices.co.uk", { fetchImpl: async () => xml("not found", 404), guard: noGuard, log: () => {} });
+  check("không có sitemap là chuyện bình thường, không lỗi", noSitemapRead.sitemapsRead.length === 0 && String(noSitemapRead.reason).includes("không tìm thấy sitemap"));
+
+  const indexXml = '<?xml version="1.0"?><sitemapindex><sitemap><loc>https://acmespices.co.uk/sitemap-pages.xml</loc></sitemap></sitemapindex>';
+  const childXml = '<?xml version="1.0"?><urlset><url><loc>https://acmespices.co.uk/suppliers/register</loc></url></urlset>';
+  const indexFetch = async (url) => (new URL(String(url)).pathname === "/sitemap-pages.xml" ? xml(childXml) : xml(indexXml));
+  const indexRead = await api.readSitemap("https://acmespices.co.uk", { fetchImpl: indexFetch, guard: noGuard, log: () => {} });
+  check("sitemap index: đọc file con rồi mới lấy URL", indexRead.urls.includes("https://acmespices.co.uk/suppliers/register"), indexRead.sitemapsRead.join(", "));
+  const cappedRead = await api.readSitemap("https://acmespices.co.uk", { fetchImpl: indexFetch, guard: noGuard, log: () => {}, maxSitemaps: 1 });
+  check("tôn trọng trần số file sitemap", cappedRead.sitemapsRead.length === 1 && cappedRead.urls.length === 0);
+
+  section("cổng quyết định có đi nguồn cấp 2 hay không");
+  const baseChannel = {
+    label: "Email",
+    certainty: "confirmed",
+    policy: "needs_mailbox_check",
+    sourceUrl: "https://acmespices.co.uk/contact",
+    evidenceSnippet: "Email: info@acmespices.co.uk",
+  };
+  const generalOnly = api.coverageOf([{ ...baseChannel, type: "email", value: "info@acmespices.co.uk", identityMatch: "company_general" }]);
+  check("chỉ có kênh chung thì chưa đủ", generalOnly.enough === false && generalOnly.companyGeneral === 1);
+  check("lý do đi tiếp nói rõ chỉ có kênh chung", String(api.secondaryReason(generalOnly)).includes("kênh chung"), api.secondaryReason(generalOnly));
+  const buyingDoor = api.coverageOf([
+    { ...baseChannel, type: "email", value: "procurement@acmespices.co.uk", identityMatch: "department", personTitle: "Procurement Manager" },
+  ]);
+  check("có kênh nhóm mua hàng thì đủ, không đi nguồn cấp 2", buyingDoor.enough === true && api.secondaryReason(buyingDoor) === undefined);
+  const vietnameseDepartment = api.coverageOf([{ ...baseChannel, type: "email", value: "muahang@acmespices.co.uk", label: "Phòng mua hàng", identityMatch: "department" }]);
+  check("nhãn bộ phận bằng tiếng Việt cũng nhận ra nhóm mua hàng", vietnameseDepartment.enough === true);
+  const salesPersonOnly = api.coverageOf([
+    { ...baseChannel, type: "email", value: "sales@acmespices.co.uk", identityMatch: "person", personTitle: "Sales Director" },
+  ]);
+  check("người ngoài nhóm mua hàng không tính là đủ", salesPersonOnly.enough === false && salesPersonOnly.named === 1);
+  const thinReason = api.secondaryReason(api.coverageOf([]));
+  check("không có kênh nào thì lý do nói rõ", String(thinReason).includes("không tìm được kênh nào"), thinReason);
+
+  section("search API: chỉ để tìm URL trong chính tên miền");
+  const searchCalls = [];
+  const searchFetch = async (url, init = {}) => {
+    searchCalls.push({ url: String(url), init });
+    const payload = {
+      organic: [
+        { title: "Supplier registration", link: "https://acmespices.co.uk/suppliers/register", snippet: "Contact procurement@acmespices.co.uk" },
+        { title: "Trade directory listing", link: "https://directory.example.com/acme-spices", snippet: "Acme Spices on a directory" },
+      ],
+    };
+    return { ok: true, status: 200, url: String(url), headers: { get: () => "application/json" }, text: async () => JSON.stringify(payload), json: async () => payload };
+  };
+  const hits = await api.searchSite("acmespices.co.uk", "supplier registration", { apiKey: "test-key", fetchImpl: searchFetch, log: () => {} });
+  check("chỉ giữ kết quả trong tên miền công ty", hits.length === 1 && hits[0].url === "https://acmespices.co.uk/suppliers/register", hits.map((hit) => hit.url).join(", "));
+  check("truy vấn luôn có site: nên phạm vi vẫn là website của họ", JSON.parse(String(searchCalls[0].init.body)).q.startsWith("site:acmespices.co.uk "));
+  check("gửi khoá qua header, không nhét vào URL", String(searchCalls[0].init.headers["x-api-key"]) === "test-key" && !searchCalls[0].url.includes("test-key"));
+  const noKeyHarvest = await api.harvestUrlsFromSearch("acmespices.co.uk", {
+    fetchImpl: async () => {
+      throw new Error("không được gọi mạng khi không có khoá");
+    },
+  });
+  check("không có khoá thì không gọi mạng", noKeyHarvest.urls.length === 0 && noKeyHarvest.provider === null && noKeyHarvest.queriesRun === 0);
+  const harvest = await api.harvestUrlsFromSearch("acmespices.co.uk", { apiKey: "test-key", fetchImpl: searchFetch, log: () => {}, limit: 2 });
+  check("thu hoạch chỉ trả URL cùng tên miền, đã bỏ trùng", harvest.urls.length === 1 && harvest.documents.length === 0 && harvest.queriesRun > 0, JSON.stringify(harvest));
+
+  section("sổ đăng ký doanh nghiệp");
+  check("chọn sổ theo quốc gia", api.registriesForCountry("UK")[0] === "companies_house" && api.registriesForCountry("United States")[0] === "sec_edgar");
+  check("quốc gia chưa có sổ miễn phí thì không đoán bừa", api.registriesForCountry("Vietnam").length === 0 && api.registriesForCountry("").length === 0);
+
+  const chCalls = [];
+  const chFetch = async (url, init = {}) => {
+    const href = String(url);
+    chCalls.push({ url: href, auth: init.headers?.authorization });
+    const json = async (payload) => ({ ok: true, status: 200, url: href, headers: { get: () => "application/json" }, text: async () => JSON.stringify(payload), json: async () => payload });
+    if (href.includes("/search/companies")) return json({ items: [{ company_number: "01234567", title: "ACME SPICES LTD" }] });
+    if (href.endsWith("/company/01234567")) {
+      return json({
+        company_name: "ACME SPICES LTD",
+        company_status: "active",
+        date_of_creation: "1998-04-02",
+        sic_codes: ["46370"],
+        previous_company_names: [{ name: "ACME HERBS LIMITED" }],
+      });
+    }
+    if (href.includes("/officers")) {
+      return json({
+        items: [
+          { name: "SMITH, Jane", officer_role: "director", appointed_on: "2015-06-01" },
+          { name: "OLD, Bill", officer_role: "director", appointed_on: "2000-01-01", resigned_on: "2015-05-30" },
+        ],
+      });
+    }
+    return json({});
+  };
+
+  const ch = await api.lookupCompaniesHouse("Acme Spices Ltd", { companiesHouseApiKey: "ch-test", fetchImpl: chFetch, log: () => {} });
+  check("trả về pháp nhân và số đăng ký", ch.finding?.registeredName === "ACME SPICES LTD" && ch.finding?.companyNumber === "01234567");
+  check("ghi lại tình trạng pháp lý", ch.finding?.status === "active");
+  check("ghi ngành theo mã SIC", ch.finding?.industry === "SIC 46370");
+  check("ghi tên cũ nếu có", ch.finding?.formerNames?.includes("ACME HERBS LIMITED") === true);
+  check("chỉ lấy người còn đương nhiệm", ch.finding?.officers.length === 1 && ch.finding.officers[0].name === "SMITH, Jane", JSON.stringify(ch.finding?.officers));
+  check("tên người giữ nguyên như sổ ghi", ch.finding.officers[0].name.includes("SMITH, Jane"));
+  check("ghi nguồn kèm tên cơ quan", ch.finding?.registryLabel === "UK Companies House" && ch.finding.sourceUrl.includes("find-and-update.company-information.service.gov.uk"));
+  check("xác thực bằng Basic auth", String(chCalls[0].auth).startsWith("Basic "));
+  check(
+    "sổ đăng ký KHÔNG tạo ra kênh liên hệ nào",
+    ch.finding.officers.every((officer) => !("email" in officer) && !("phone" in officer) && !("value" in officer)) && !JSON.stringify(ch.finding).includes("@"),
+  );
+  const chNoKey = await api.lookupCompaniesHouse("Acme Spices Ltd", {
+    fetchImpl: async () => {
+      throw new Error("không được gọi mạng khi thiếu khoá");
+    },
+  });
+  check("thiếu khoá thì nói rõ thiếu khoá, không gọi mạng", chNoKey.queried.length === 0 && String(chNoKey.reason).includes("COMPANIES_HOUSE_API_KEY"), chNoKey.reason);
+
+  const secFetch = async (url) => {
+    const href = String(url);
+    const make = (body, contentType = "application/json") => ({
+      ok: true,
+      status: 200,
+      url: href,
+      headers: { get: () => contentType },
+      text: async () => body,
+      json: async () => JSON.parse(body),
+    });
+    if (href.includes("browse-edgar")) {
+      return make(
+        '<?xml version="1.0"?><feed><entry><link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0000320193&amp;type=10-K"/></entry></feed>',
+        "application/atom+xml",
+      );
+    }
+    if (href.includes("data.sec.gov/submissions")) {
+      return make(
+        JSON.stringify({
+          name: "APPLE INC",
+          sicDescription: "ELECTRONIC COMPUTERS",
+          formerNames: [{ name: "APPLE COMPUTER INC" }],
+          filings: { recent: { form: ["10-K"], filingDate: ["2025-10-31"] } },
+        }),
+      );
+    }
+    return make("{}");
+  };
+  const sec = await api.lookupSecEdgar("Apple Inc", { fetchImpl: secFetch, log: () => {} });
+  check("SEC: nhận ra pháp nhân và số CIK", sec.finding?.companyNumber === "CIK 0000320193", JSON.stringify(sec.finding));
+  check("SEC: ghi hồ sơ gần nhất thay vì bịa tình trạng", String(sec.finding?.status).includes("2025-10-31"));
+  check("SEC: ghi ngành theo SIC", sec.finding?.industry === "ELECTRONIC COMPUTERS");
+  check("SEC: không gán tên người khi chưa đọc hồ sơ", sec.finding?.officers.length === 0);
+  check("SEC: nguồn trỏ về hồ sơ gốc", String(sec.finding?.sourceUrl).includes("sec.gov"));
+  const noRegistry = await api.lookupRegistry("Vietnam", "Acme Spices Ltd", {
+    fetchImpl: async () => {
+      throw new Error("không được gọi mạng khi chưa có sổ cho quốc gia này");
+    },
+  });
+  check("quốc gia chưa có sổ thì trả lý do, không gọi mạng", noRegistry.queried.length === 0 && String(noRegistry.reason).includes("chưa có sổ đăng ký miễn phí"));
+
+  section("chạy nguồn cấp 2 đầu-cuối");
+  const secondaryRequests = [];
+  const secondaryFetch = async (url) => {
+    const href = String(url);
+    secondaryRequests.push(href);
+    const make = (body, contentType = "text/html; charset=utf-8", status = 200) => ({
+      ok: status >= 200 && status < 300,
+      status,
+      url: href,
+      headers: { get: () => contentType },
+      text: async () => body,
+      json: async () => JSON.parse(body),
+      arrayBuffer: async () => Uint8Array.from(body, (c) => c.charCodeAt(0) & 0xff).buffer,
+    });
+
+    if (href.endsWith("/robots.txt")) return make(files["secondary/robots.txt"], "text/plain");
+    if (href.endsWith("/sitemap.xml")) return make(files["secondary/sitemap.xml"], "application/xml");
+    if (href.includes("google.serper.dev")) {
+      return make(
+        JSON.stringify({
+          organic: [
+            { title: "Supplier registration", link: "https://acmespices.co.uk/suppliers/register", snippet: "procurement@acmespices.co.uk" },
+            { title: "Trade directory", link: "https://directory.example.com/acme-spices", snippet: "Acme Spices directory listing" },
+          ],
+        }),
+        "application/json",
+      );
+    }
+    if (href.includes("api.company-information.service.gov.uk/search/companies")) {
+      return make(JSON.stringify({ items: [{ company_number: "01234567", title: "ACME SPICES LTD" }] }), "application/json");
+    }
+    if (href.includes("api.company-information.service.gov.uk/company/01234567/officers")) {
+      return make(JSON.stringify({ items: [{ name: "SMITH, Jane", officer_role: "director", appointed_on: "2015-06-01" }] }), "application/json");
+    }
+    if (href.includes("api.company-information.service.gov.uk/company/01234567")) {
+      return make(JSON.stringify({ company_name: "ACME SPICES LTD", company_status: "active", sic_codes: ["46370"] }), "application/json");
+    }
+    if (href.includes("company-information") || href.includes("directory.example.com") || href.includes("/blocked")) return make("không được đọc", "text/html", 403);
+
+    if (href === "https://acmespices.co.uk/" || href === "https://acmespices.co.uk") return make(files["secondary/home.html"]);
+    if (href.endsWith("/contact")) return make(files["secondary/contact.html"]);
+    if (href.endsWith("/about")) return make(files["secondary/about.html"]);
+    if (href.endsWith("/suppliers/register")) return make(files["secondary/procurement.html"]);
+    return make("not found", "text/html", 404);
+  };
+
+  const thinRun = await api.runConnector("acmespices.co.uk", {
+    fetchImpl: secondaryFetch,
+    maxPages: 6,
+    maxDocuments: 2,
+    delayMs: 0,
+    guard: noGuard,
+    log: () => {},
+    country: "United Kingdom",
+    companyName: "Acme Spices Ltd",
+    secondary: { searchApiKey: "serper-test", companiesHouseApiKey: "ch-test" },
+  });
+
+  check("bước 2 chỉ ra kênh chung", thinRun.channels.some((channel) => channel.value === "info@acmespices.co.uk"));
+  check("bước 2 dùng cả sitemap", thinRun.pages.some((page) => page.url.endsWith("/about")), thinRun.pages.map((page) => page.url).join(", "));
+  check("nguồn cấp 1 mỏng thì nguồn cấp 2 được chạy", thinRun.secondary?.ran === true, JSON.stringify(thinRun.secondary));
+  check("nhật ký nói rõ vì sao chạy", String(thinRun.secondary?.reason).includes("kênh chung"), thinRun.secondary?.reason);
+  check("đã hỏi sổ đăng ký Anh", thinRun.secondary?.registriesQueried.includes("companies_house") === true);
+  check("kết quả đối chiếu pháp nhân đi kèm báo cáo", thinRun.registry?.companyNumber === "01234567");
+  check("có ghi lại việc dùng search API", (thinRun.secondary?.search?.queries ?? 0) > 0 && thinRun.secondary?.search?.provider === "serper");
+  const fromSearch = thinRun.channels.find((channel) => channel.value === "procurement@acmespices.co.uk");
+  check("đọc thật trang do search chỉ đường", fromSearch?.sourceUrl === "https://acmespices.co.uk/suppliers/register", fromSearch?.sourceUrl);
+  check("bằng chứng là câu chữ trên trang, không phải snippet của search", String(fromSearch?.evidenceSnippet).includes("procurement@acmespices.co.uk"), fromSearch?.evidenceSnippet);
+  check("sau bước 3 đã có kênh thuộc nhóm mua hàng", api.coverageOf(thinRun.channels).enough === true);
+  check("đường dẫn robots.txt chặn không được tải", !secondaryRequests.some((url) => url.includes("/blocked")), secondaryRequests.filter((url) => url.includes("blocked")).join(", "));
+  check("kết quả ngoài tên miền không được tải", !secondaryRequests.some((url) => url.includes("directory.example.com")));
+  check("mọi kênh tìm được vẫn thuộc tên miền công ty", thinRun.channels.every((channel) => channel.sourceUrl.includes("acmespices.co.uk")));
+  check("sổ đăng ký không sinh ra kênh liên hệ", !thinRun.channels.some((channel) => String(channel.value).includes("SMITH")));
+  check("kênh chung vẫn giữ nguyên, không bị thay bằng kênh mới", thinRun.channels.some((channel) => channel.value === "info@acmespices.co.uk"));
+
+  const offlineRequests = [];
+  const thinNoKeys = await api.runConnector("acmespices.co.uk", {
+    fetchImpl: async (url) => {
+      offlineRequests.push(String(url));
+      return secondaryFetch(url);
+    },
+    maxPages: 6,
+    maxDocuments: 2,
+    delayMs: 0,
+    guard: noGuard,
+    log: () => {},
+    country: "United Kingdom",
+    companyName: "Acme Spices Ltd",
+  });
+  check("chưa cấu hình khoá thì nguồn cấp 2 không chạy", thinNoKeys.secondary?.ran === false);
+  check("và nhật ký nói rõ thiếu cấu hình", String(thinNoKeys.secondary?.reason).includes("chưa cấu hình"), thinNoKeys.secondary?.reason);
+  check("không có lượt gọi nào ra ngoài tên miền công ty", offlineRequests.every((url) => url.includes("acmespices.co.uk")), offlineRequests.filter((url) => !url.includes("acmespices.co.uk")).join(", "));
+
+  const offRequests = [];
+  const thinOff = await api.runConnector("acmespices.co.uk", {
+    fetchImpl: async (url) => {
+      offRequests.push(String(url));
+      return secondaryFetch(url);
+    },
+    maxPages: 6,
+    maxDocuments: 2,
+    delayMs: 0,
+    guard: noGuard,
+    log: () => {},
+    country: "United Kingdom",
+    companyName: "Acme Spices Ltd",
+    secondary: false,
+  });
+  check("tắt nguồn cấp 2 thì không chạy", thinOff.secondary?.ran === false && String(thinOff.secondary?.reason).includes("bị tắt"));
+  check("và cũng không gọi ra ngoài", offRequests.every((url) => url.includes("acmespices.co.uk")), offRequests.filter((url) => !url.includes("acmespices.co.uk")).join(", "));
+
+  const gateRequests = [];
+  const gateRun = await api.runConnector("mariani.com", {
+    fetchImpl: async (url) => {
+      gateRequests.push(String(url));
+      return mockFetch(url);
+    },
+    maxPages: 5,
+    maxDocuments: 2,
+    delayMs: 0,
+    guard: noGuard,
+    log: () => {},
+    country: "United States",
+    companyName: "Mariani Packing Co.",
+    secondary: { searchApiKey: "serper-test", companiesHouseApiKey: "ch-test" },
+  });
+  check("khi đã có kênh mua hàng thì không gọi search API", !gateRequests.some((url) => url.includes("serper")), gateRequests.join(", "));
+  check("và không tra sổ đăng ký", gateRun.secondary?.registriesQueried.length === 0 && gateRun.secondary?.ran === false, JSON.stringify(gateRun.secondary));
+  check("nhật ký nói rõ lý do không chạy", String(gateRun.secondary?.reason).includes("nhóm mua hàng"), gateRun.secondary?.reason);
+  check("kết quả lần chạy này y như trước khi thêm nguồn cấp 2", gateRun.channels.length === result.channels.length, `${gateRun.channels.length} vs ${result.channels.length}`);
 
   section("đầu vào sai");
   const bad = await api.runConnector("", { fetchImpl: mockFetch, delayMs: 0, guard: noGuard, log: () => {} }).then(() => false).catch(() => true);
