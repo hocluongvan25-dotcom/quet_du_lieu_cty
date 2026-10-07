@@ -26,6 +26,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { bundleTs, loadEnvFile } from "./lib/ts-module.mjs";
+import { formatReviewHints } from "./lib/review-hints.mjs";
 
 const root = process.cwd();
 const workDir = path.join(root, ".connector-test");
@@ -164,6 +165,8 @@ export const runConnectorFn = runConnector;
     if (result.secondary.registriesQueried.length > 0) console.log(`  sổ đăng ký đã hỏi: ${result.secondary.registriesQueried.join(", ")}`);
     if (result.secondary.registryReason) console.log(`  sổ đăng ký không cho kết quả: ${result.secondary.registryReason}`);
   }
+
+  for (const line of formatReviewHints(result.reviewHints)) console.log(line);
 
   if (result.people.length > 0) {
     console.log("\nNGƯỜI TÌM ĐƯỢC:");

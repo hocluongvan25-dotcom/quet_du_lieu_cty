@@ -38,7 +38,7 @@ import { pdfToLines } from "./pdf";
 import { planDiscovery, normalizeSeed, hostOf, type DiscoveryOptions } from "./discover";
 import { registrableDomain } from "./html";
 import { isPathAllowed } from "./robots";
-import { coverageOf, secondaryReason } from "./gate";
+import { coverageOf, nearMissBuyingDoors, secondaryReason } from "./gate";
 import {
   harvestUrlsFromSearch,
   lookupRegistry,
@@ -389,11 +389,22 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
     dedupedNotes.push(note);
   });
 
+  // Danh sách "gần đúng" tính **sau** bước 3, trên kênh cuối cùng: chỉ nêu khi
+  // đã thử mọi bước mà vẫn chưa tới được cửa mua hàng. Có cửa thật rồi thì thôi —
+  // lúc đó nêu thêm chỉ làm loãng thứ đã tìm được.
+  // Lưu ý: hàm này **không** tham gia vào cổng quyết định; coverage phía trên
+  // giữ nguyên, nên một dòng "gần đúng" không bao giờ chặn bước sau.
+  const reviewHints = coverageOf(channels).enough ? [] : nearMissBuyingDoors(channels);
+  if (reviewHints.length > 0) {
+    log(`kênh gần đúng: ${reviewHints.length} hộp thư có tên gợi tới nguyên liệu/vật tư — để người xem lại, không tính vào cổng`);
+  }
+
   return {
     seedUrl,
     domain,
     pages,
     channels,
+    reviewHints,
     people: [...people.values()],
     requirements: sortRequirements(requirements),
     ...(registry ? { registry } : {}),

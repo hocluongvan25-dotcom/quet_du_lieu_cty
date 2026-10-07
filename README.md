@@ -270,7 +270,7 @@ npm run connector:run acmespices.co.uk -- --no-secondary   # company site only
 | `persist.ts` | Builds the database rows (pure) and writes them through a small store port: `buyer_profiles`, `decision_makers`, `contact_channels`, `buyer_routes` |
 
 ```bash
-npm run connector:test    # 241 checks on real HTML and PDF fixtures, no network needed
+npm run connector:test    # 258 checks on real HTML and PDF fixtures, no network needed
 npm run connector:run mariani.com            # real run, human readable
 npm run connector:run mariani.com -- --json  # full JSON
 ```
@@ -283,7 +283,9 @@ npm run connector:run mariani.com -- --json  # full JSON
 | UK Companies House | `COMPANIES_HOUSE_API_KEY` | Legal name, company number, status, incorporation date, SIC code, former names, current officers — entity confirmation for step 1. **The register has no email or phone, so it never creates a channel.** Open Government Licence; source label always written. |
 | US SEC EDGAR | `SEC_USER_AGENT` (optional — SEC wants a User-Agent with a contact, e.g. `Your Name <you@example.com>`; without one EDGAR answers 403) | Legal name, CIK, SIC industry, former names, latest filing. EDGAR does not list officers (that lives inside each filing), so no names are guessed. |
 
-Countries without a free register (Vietnam included) get an explicit "no register available for this country" reason rather than a substitute source. `--no-secondary`, or `secondary: false` over HTTP, disables the step entirely. Every command that reads those keys — `connector:run`, `search:check`, `reverify:run`, `retention:run` — reads `.env.local` first and the shell environment second, so a key pasted into `.env.local` is actually used rather than silently skipped; `connector:run` prints which source it took the key from and warns when step 3 has no key at all.
+Countries without a free register (Vietnam included) get an explicit "no register available for this country" reason rather than a substitute source. `--no-secondary`, or `secondary: false` over HTTP, disables the step entirely. When a run ends without a buying door but the site does publish a department mailbox whose name points at what the company buys (`ingredients@`, `raw-materials@`, `nguyen-lieu@`), the result carries a **near-miss** line (`reviewHints`) with the matched word and the reason: *the mailbox name does not say whether that desk buys or sells*. It is data for a human to judge, it never opens the gate, and it is only reported when every step has been tried and the run is still thin — a real door found means the list is empty.
+
+Every command that reads those keys — `connector:run`, `search:check`, `reverify:run`, `retention:run` — reads `.env.local` first and the shell environment second, so a key pasted into `.env.local` is actually used rather than silently skipped; `connector:run` prints which source it took the key from and warns when step 3 has no key at all.
 
 Before buying a key, `npm run search:check` calls **the same request the connector builds** (and prints which endpoint it called, how many rows came back, and how many of those were inside the probe domain — HTTP 200 with an error body is reported as *not connected*, not as success) (same `buildSearchRequest`/`parseSearchHits`) against a public domain, so "the key works" is measured rather than assumed — and with no key it prints the three providers, their free tiers and the two lines to add to `.env.local`, then exits 0, because running without step 3 is a normal state.
 

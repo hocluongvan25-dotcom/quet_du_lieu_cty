@@ -381,6 +381,24 @@ Kiểm chứng: `npm run export:test` — 43 check, gồm đọc lại CSV bằn
 
 ---
 
+### Dòng "gần đúng — người xem lại" (07/10/2026)
+
+Một báo cáo nói *"chưa có kênh nào thuộc nhóm mua hàng"* trong khi trên trang có `ingredients@mariani.com` là câu **đúng nhưng vô dụng**. Hộp thư đó **có thể** là cửa vào bộ phận thu mua — cũng có thể là bộ phận **bán** nguyên liệu; tên hộp thư không cho biết bên nào. Người dùng nhìn một giây là quyết, nên hệ thống không tự quyết thay họ và cũng không im lặng: nó nêu ra kèm lý do.
+
+`nearMissBuyingDoors` (trong `gate.ts`) tìm những hộp thư như vậy và trả về `value` + từ khoá khớp + lý do. Kết quả nằm ở trường `reviewHints` của `ConnectorResult`, CLI in thành mục **"GẦN ĐÚNG — NGƯỜI XEM LẠI"**, API trả trong JSON.
+
+Ba hàng rào giữ cho danh sách này không thành nhiễu:
+
+| Hàng rào | Vì sao |
+| --- | --- |
+| Chỉ xét **email** | Số điện thoại và biểu mẫu không có tên hộp thư để đọc |
+| Bỏ qua kênh gắn với **một người** | Đã có tên để tra chức danh, không cần "gần đúng" |
+| Bỏ qua kênh **đã thuộc nhóm mua hàng** | Đó là cửa thật, không phải gần đúng |
+
+**Điều quan trọng nhất:** danh sách này **không** tham gia vào cổng quyết định. `coverageOf` giữ nguyên, nên một dòng "gần đúng" không bao giờ chặn bước 3 — và ngược lại, nó chỉ được nêu khi **đã thử mọi bước mà vẫn chưa tới cửa**: tìm được cửa thật rồi thì danh sách rỗng, vì lúc đó nêu thêm chỉ làm loãng thứ đã tìm được.
+
+Danh sách từ khoá (`NEAR_MISS_WORDS`: `ingredient`, `raw material`, `rawmaterials`, `materials`, `nguyen lieu`, `nguyenlieu`) **cố ý giữ ngắn và ở một chỗ**. Mỗi từ thêm vào là một lần hệ thống tự cho mình quyền đoán thêm — nguyên tắc chung của dự án là mở rộng danh sách này chỉ khi có ca thật, và khi mở thì sửa đúng một dòng.
+
 ## 14. Các lớp nguồn, và AI làm gì trong dự án này
 
 ### 14.1 "Tự vào tự tìm" được đến đâu
@@ -663,7 +681,7 @@ Một chỗ in như vậy biến **"chưa kiểm được"** thành **"đã ki�
 
 ### Kiểm chứng
 
-- `npm run connector:test` — 241 check ở vòng 012 (120 ở vòng này), thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
+- `npm run connector:test` — 258 check ở vòng 012 (120 ở vòng này), thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
 - `npm run persist:test` — 63 check: E.164 được lưu đúng, `has_whatsapp` là `null` sau khi connector ghi, view WhatsApp trống khi chưa kiểm, rồi mô phỏng kết quả kiểm → view trả `https://wa.me/17074522800`, và hai ràng buộc mới bị database từ chối thi hành.
 
 ---
@@ -841,7 +859,7 @@ Với `SEARCH_API_KEY` / `SEARCH_PROVIDER` / `COMPANIES_HOUSE_API_KEY` đặt tr
 
 ### Kiểm chứng
 
-`npm run connector:test` — **241 check** ở vòng 012 (182 ở vòng này, 120 trước đó): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá, hình dạng request/kết quả của cả ba nhà cung cấp, kết quả hỏng bị bỏ), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
+`npm run connector:test` — **258 check** ở vòng 012 (182 ở vòng này, 120 trước đó): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá, hình dạng request/kết quả của cả ba nhà cung cấp, kết quả hỏng bị bỏ), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
 
 ### Kèm theo: `info@` không còn bị xếp là email bộ phận
 

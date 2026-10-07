@@ -12,6 +12,7 @@ import zlib from "node:zlib";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { bundleTs } from "./lib/ts-module.mjs";
+import { formatReviewHints } from "./lib/review-hints.mjs";
 
 const root = process.cwd();
 const workDir = path.join(root, ".connector-test");
@@ -99,12 +100,12 @@ import { extractFromLines } from "@/lib/connector/extract";
 import { buildBuyerWriteBatch } from "@/lib/connector/persist";
 import { toE164, whatsappLink, isE164, resolveCountry } from "@/lib/connector/phone";
 import { readSitemap } from "@/lib/connector/sitemap";
-import { coverageOf, secondaryReason } from "@/lib/connector/gate";
+import { coverageOf, nearMissBuyingDoors, secondaryReason } from "@/lib/connector/gate";
 import { searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry, DEFAULT_SEC_USER_AGENT, readCikFromEdgarFeed } from "@/lib/connector/secondary";
 import { buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck } from "@/lib/connector/whatsapp";
 import { asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT } from "@/lib/connector/fetch";
 
-export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, collapseFormChannels, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, DEFAULT_SEC_USER_AGENT, readCikFromEdgarFeed, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT, lookupSecEdgar, lookupRegistry, registriesForCountry };
+export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, nearMissBuyingDoors, secondaryReason, collapseFormChannels, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, DEFAULT_SEC_USER_AGENT, readCikFromEdgarFeed, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT, lookupSecEdgar, lookupRegistry, registriesForCountry };
 `;
   await mkdir(workDir, { recursive: true });
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
@@ -703,6 +704,73 @@ async function runChecks(api, files) {
     String(secCalls[secCalls.length - 1].headers["user-agent"]),
   );
 
+
+  section("dòng 'gần đúng' — nêu ra để người xem lại, không mở cổng");
+  const deptChannel = (value, label = "Email bộ phận") => ({
+    ...baseChannel,
+    type: "email",
+    value,
+    label,
+    identityMatch: "department",
+  });
+  const ingredients = api.nearMissBuyingDoors([deptChannel("ingredients@mariani.com")]);
+  check(
+    "hộp thư theo bộ phận tên 'ingredients' được nêu ra",
+    ingredients.length === 1 && ingredients[0].value === "ingredients@mariani.com" && ingredients[0].matched === "ingredient",
+    JSON.stringify(ingredients),
+  );
+  check(
+    "lý do nói rõ tên hộp thư không cho biết bên mua hay bên bán, và để người xem lại",
+    ingredients[0].reason.includes("không cho biết") && ingredients[0].reason.includes("xem lại"),
+    ingredients[0].reason,
+  );
+  check(
+    "lý do không chứa câu khuyên bảo (check:content cũng cấm những câu này)",
+    !/khuyến nghị|nên gặp|nên liên hệ|ưu tiên/i.test(ingredients[0].reason),
+    ingredients[0].reason,
+  );
+  check(
+    "và KHÔNG được tính là cửa mua hàng: cổng vẫn đóng, bước sau vẫn chạy",
+    api.coverageOf([deptChannel("ingredients@mariani.com")]).enough === false &&
+      api.coverageOf([deptChannel("ingredients@mariani.com")]).buying === 0 &&
+      String(api.secondaryReason(api.coverageOf([deptChannel("ingredients@mariani.com")]))).includes("nhóm mua hàng"),
+  );
+
+  check(
+    "các cách viết khác nhau của cùng ý đều nhận ra",
+    ["raw-materials@x.com", "raw.materials@x.com", "materials@x.com", "nguyen-lieu@x.com", "nguyenlieu@x.com"]
+      .every((value) => api.nearMissBuyingDoors([deptChannel(value)]).length === 1),
+    ["raw-materials@x.com", "materials@x.com", "nguyen-lieu@x.com"].map((value) => JSON.stringify(api.nearMissBuyingDoors([deptChannel(value)]))).join(", "),
+  );
+  check(
+    "từ khoá dài nhất được nêu, để lý do đọc lên là hiểu",
+    api.nearMissBuyingDoors([deptChannel("raw-materials@x.com")])[0].matched === "raw material",
+  );
+  check(
+    "hộp thư chung không có từ khoá thì không nêu — danh sách này không được thành nhiễu",
+    api.nearMissBuyingDoors([deptChannel("info@mariani.com", "Email chung")]).length === 0 &&
+      api.nearMissBuyingDoors([deptChannel("headoffice@mariani.com")]).length === 0,
+  );
+  check(
+    "kênh gắn với một người thì bỏ qua (đã có tên để tra)",
+    api.nearMissBuyingDoors([{ ...baseChannel, type: "email", value: "ingredients.jane@x.com", identityMatch: "person", personName: "Jane" }]).length === 0,
+  );
+  check(
+    "kênh đã thuộc nhóm mua hàng thì bỏ qua — đó là cửa thật, không phải gần đúng",
+    api.nearMissBuyingDoors([deptChannel("procurement@x.com", "Phòng mua hàng")]).length === 0,
+  );
+  check(
+    "chỉ xét email: số điện thoại và biểu mẫu không có tên hộp thư để đọc",
+    api.nearMissBuyingDoors([
+      { ...baseChannel, type: "phone", value: "+84912345678", label: "Ingredients line", identityMatch: "company_general" },
+      { ...baseChannel, type: "form", value: "https://x.com/materials", label: "Biểu mẫu", identityMatch: "company_general" },
+    ]).length === 0,
+  );
+  check(
+    "nhiều hộp thư gần đúng thì nêu từng cái, không gộp",
+    api.nearMissBuyingDoors([deptChannel("ingredients@x.com"), deptChannel("materials@x.com")]).length === 2,
+  );
+
   section("search API: chỉ để tìm URL trong chính tên miền");
   const searchCalls = [];
   const searchFetch = async (url, init = {}) => {
@@ -1070,6 +1138,97 @@ async function runChecks(api, files) {
   check("và không tra sổ đăng ký", gateRun.secondary?.registriesQueried.length === 0 && gateRun.secondary?.ran === false, JSON.stringify(gateRun.secondary));
   check("nhật ký nói rõ lý do không chạy", String(gateRun.secondary?.reason).includes("nhóm mua hàng"), gateRun.secondary?.reason);
   check("kết quả lần chạy này y như trước khi thêm nguồn cấp 2", gateRun.channels.length === result.channels.length, `${gateRun.channels.length} vs ${result.channels.length}`);
+
+
+  section("đầu-cuối: dòng 'gần đúng' xuất hiện đúng lúc, và tắt khi đã có cửa thật");
+  const nearMissRequests = [];
+  const nearMissFetch = async (url) => {
+    const href = String(url);
+    nearMissRequests.push(href);
+    const make = (body, contentType = "text/html; charset=utf-8", status = 200) => ({
+      ok: status >= 200 && status < 300,
+      status,
+      url: href,
+      headers: { get: () => contentType },
+      text: async () => body,
+      json: async () => JSON.parse(body),
+    });
+    if (href.endsWith("/robots.txt")) return make("User-agent: *\nAllow: /", "text/plain");
+    if (href.includes("sitemap")) return make("not found", "text/plain", 404);
+    if (href === "https://driedfruitltd.co.uk/" || href === "https://driedfruitltd.co.uk") {
+      return make('<html><body><nav><a href="/contact">Contact</a><a href="/bulk">Bulk &amp; Ingredients</a></nav></body></html>');
+    }
+    if (href.endsWith("/contact")) {
+      return make('<html><body><h1>Contact Us</h1><p>Email: <a href="mailto:info@driedfruitltd.co.uk">info@driedfruitltd.co.uk</a></p></body></html>');
+    }
+    if (href.endsWith("/bulk")) {
+      return make(
+        '<html><body><h1>Bulk &amp; Ingredients</h1><p>For bulk ingredient enquiries email <a href="mailto:ingredients@driedfruitltd.co.uk">ingredients@driedfruitltd.co.uk</a></p></body></html>',
+      );
+    }
+    return make("not found", "text/html", 404);
+  };
+  const nearMissRun = await api.runConnector("driedfruitltd.co.uk", {
+    fetchImpl: nearMissFetch,
+    maxPages: 4,
+    maxDocuments: 0,
+    delayMs: 0,
+    guard: noGuard,
+    log: () => {},
+    secondary: false,
+  });
+  check(
+    "hộp thư gần đúng được nêu ra kèm lý do",
+    nearMissRun.reviewHints.length === 1 && nearMissRun.reviewHints[0].value === "ingredients@driedfruitltd.co.uk",
+    JSON.stringify(nearMissRun.reviewHints),
+  );
+  check(
+    "cổng vẫn đóng: dòng gần đúng không được tính là cửa mua hàng",
+    api.coverageOf(nearMissRun.channels).enough === false && api.coverageOf(nearMissRun.channels).buying === 0,
+  );
+  check(
+    "hộp thư gần đúng vẫn là kênh bình thường trong danh sách kênh",
+    nearMissRun.channels.some((channel) => channel.value === "ingredients@driedfruitltd.co.uk"),
+  );
+  check(
+    "và nó xuất hiện cả khi đã tắt nguồn cấp 2 — dòng này thuộc về kết quả, không thuộc về bước 3",
+    nearMissRun.secondary?.ran === false && nearMissRun.reviewHints.length === 1,
+  );
+  check(
+    "đã có cửa mua hàng thật thì danh sách gần đúng rỗng",
+    gateRun.reviewHints.length === 0,
+    JSON.stringify(gateRun.reviewHints),
+  );
+  check(
+    "lần chạy mỏng mà bước 3 mở được cửa thì cũng không nêu gần đúng nữa",
+    thinRun.reviewHints.length === 0 && api.coverageOf(thinRun.channels).enough === true,
+    JSON.stringify(thinRun.reviewHints),
+  );
+
+
+  section("phần chữ người dùng đọc: mục 'gần đúng' trong kết quả CLI");
+  check("không có dòng gần đúng thì không in gì (kể cả tiêu đề)", formatReviewHints([]).length === 0 && formatReviewHints(undefined).length === 0);
+  const printed = formatReviewHints([{ value: "ingredients@x.com", matched: "ingredient", reason: "lý do thật" }]);
+  check(
+    "có thì in tiêu đề, giá trị, và lý do",
+    printed.some((line) => line.includes("GẦN ĐÚNG") && line.includes("NGƯỜI XEM LẠI")) &&
+      printed.some((line) => line.includes("ingredients@x.com")) &&
+      printed.some((line) => line.includes("lý do thật")),
+    printed.join(" | "),
+  );
+  check(
+    "giá trị và lý do nằm trên hai dòng khác nhau, để đọc được lý do",
+    printed.filter((line) => line.includes("ingredients@x.com")).length === 1 &&
+      printed.filter((line) => line.includes("lý do thật")).length === 1,
+  );
+  check(
+    "dòng in ra từ lần chạy thật chứa cả hộp thư lẫn lý do",
+    (() => {
+      const text = formatReviewHints(nearMissRun.reviewHints).join("\n");
+      return text.includes("ingredients@driedfruitltd.co.uk") && text.includes("không cho biết") && text.includes("xem lại");
+    })(),
+    formatReviewHints(nearMissRun.reviewHints).join(" | "),
+  );
 
   section("đầu vào sai");
   const bad = await api.runConnector("", { fetchImpl: mockFetch, delayMs: 0, guard: noGuard, log: () => {} }).then(() => false).catch(() => true);

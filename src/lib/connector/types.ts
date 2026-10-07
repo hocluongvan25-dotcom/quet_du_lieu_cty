@@ -78,6 +78,22 @@ export type SecondaryReport = {
   registryReason?: string;
 };
 
+/**
+ * Kênh "gần đúng": hộp thư theo bộ phận có tên gợi tới **thứ công ty mua vào**
+ * (nguyên liệu, vật tư…) nhưng không thuộc nhóm mua hàng theo luật hiện tại.
+ *
+ * Là **dữ liệu để người xem lại**, không phải một kết luận và không phải một
+ * gợi ý hành động. Hộp thư tên `ingredients@` không cho biết đó là bộ phận mua
+ * hay bộ phận bán — vì vậy nó không được tính vào cổng quyết định (cổng vẫn
+ * đóng, bước sau vẫn chạy), mà chỉ được nêu ra kèm lý do.
+ */
+export type NearMissDoor = {
+  value: string;
+  /** Từ khoá đã khớp, để người đọc biết vì sao dòng này được nêu. */
+  matched: string;
+  reason: string;
+};
+
 export type ConnectorResult = {
   seedUrl: string;
   domain: string;
@@ -90,6 +106,12 @@ export type ConnectorResult = {
   registry?: RegistryFinding;
   /** Nhật ký nguồn cấp 2: có chạy không, vì sao, đã hỏi những đâu. */
   secondary?: SecondaryReport;
+  /**
+   * Những hộp thư "gần đúng" — chỉ có khi **sau tất cả các bước** vẫn chưa tới
+   * được cửa mua hàng. Có cửa thật rồi thì danh sách này rỗng: lúc đó nêu thêm
+   * chỉ làm loãng thứ đã tìm được.
+   */
+  reviewHints: NearMissDoor[];
   notes: ConnectorNote[];
   /** Số trang đã tải thực tế. */
   pagesFetched: number;

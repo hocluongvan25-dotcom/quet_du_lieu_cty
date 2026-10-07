@@ -21,7 +21,7 @@
  */
 
 import { classifyRole, isBuyingRole, type RoleKind } from "@/lib/roles";
-import type { FoundChannel } from "./types";
+import type { FoundChannel, NearMissDoor } from "./types";
 
 export type Coverage = {
   /** Tổng số kênh tìm được ở nguồn cấp 1. */
@@ -67,6 +67,63 @@ export function coverageOf(channels: FoundChannel[]): Coverage {
   }
 
   return { total: channels.length, buying, named, department, companyGeneral, enough: buying > 0 };
+}
+
+/**
+ * Từ khoá "gần đúng": tên hộp thư gợi tới **thứ công ty mua vào**.
+ *
+ * Cố ý giữ ngắn, và chỉ ở một chỗ. Mỗi từ thêm vào là một lần hệ thống tự cho
+ * mình quyền đoán thêm — mà đoán sai ở đây thì đắt: nó biến hộp thư của bộ phận
+ * khác thành "cửa vào phòng mua hàng" trong mắt người đọc.
+ */
+export const NEAR_MISS_WORDS = ["ingredient", "rawmaterial", "raw material", "materials", "nguyen lieu", "nguyenlieu"] as const;
+
+function normalizeMailbox(localPart: string): string {
+  return localPart
+    .toLowerCase()
+    .replace(/[._\-+]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Tìm những hộp thư "gần đúng" — để **người xem lại**, không phải để mở cổng.
+ *
+ * Vì sao cần: một báo cáo nói "chưa có kênh nào thuộc nhóm mua hàng" trong khi
+ * trên trang có `ingredients@` là một câu đúng nhưng vô dụng. Hộp thư đó có thể
+ * là cửa vào bộ phận thu mua, cũng có thể là bộ phận bán nguyên liệu — **tên hộp
+ * thư không cho biết**, nên hệ thống không tự quyết: nó nêu ra kèm lý do, người
+ * đọc quyết trong một giây.
+ *
+ * Ba hàng rào, để danh sách này không phình thành nhiễu:
+ *  - chỉ xét **email** (số điện thoại và biểu mẫu không có tên hộp thư để đọc);
+ *  - bỏ qua kênh gắn với **một người** (đã có tên để tra, không cần "gần đúng");
+ *  - bỏ qua kênh **đã thuộc nhóm mua hàng** (đó là cửa thật, không phải gần đúng).
+ *
+ * Hàm thuần (không I/O) nên kiểm được bằng test, và **không** tham gia vào
+ * `coverageOf` — cổng quyết định giữ nguyên như trước.
+ */
+export function nearMissBuyingDoors(channels: FoundChannel[]): NearMissDoor[] {
+  const hints: NearMissDoor[] = [];
+
+  for (const channel of channels) {
+    if (channel.type !== "email") continue;
+    if (channel.identityMatch === "person") continue;
+    if (channelRoles(channel).some(isBuyingRole)) continue;
+
+    const local = normalizeMailbox(channel.value.split("@")[0] ?? "");
+    const matched = [...NEAR_MISS_WORDS].filter((word) => local.includes(word)).sort((a, b) => b.length - a.length)[0];
+    if (!matched) continue;
+
+    const where = channel.identityMatch === "department" ? "Hộp thư theo bộ phận" : "Hộp thư chung của công ty";
+    hints.push({
+      value: channel.value,
+      matched,
+      reason: `${where}, tên chứa "${matched}" — gợi tới nguyên liệu/vật tư, nhưng tên hộp thư không cho biết đó là bộ phận mua hay bộ phận bán. Luật hiện tại không tính là kênh mua hàng, nên để người xem lại.`,
+    });
+  }
+
+  return hints;
 }
 
 /** Lý do đi tiếp, viết cho người đọc nhật ký (không hiện cho người dùng cuối). */
