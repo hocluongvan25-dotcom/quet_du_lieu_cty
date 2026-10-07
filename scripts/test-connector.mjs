@@ -90,7 +90,8 @@ async function main() {
 
   const entry = `
 import { runConnector, collapseFormChannels } from "@/lib/connector/index";
-import { extractFromPage } from "@/lib/connector/extract";
+import { extractFromPage, metaDescription } from "@/lib/connector/extract";
+import { mentionsName, nameSlug, foldName } from "@/lib/connector/identity";
 import { normalizeSeed, collectCandidateLinks } from "@/lib/connector/discover";
 import { parseRobots, isPathAllowed } from "@/lib/connector/robots";
 import { htmlToLines, registrableDomain } from "@/lib/connector/html";
@@ -101,11 +102,11 @@ import { buildBuyerWriteBatch } from "@/lib/connector/persist";
 import { toE164, whatsappLink, isE164, resolveCountry } from "@/lib/connector/phone";
 import { readSitemap } from "@/lib/connector/sitemap";
 import { coverageOf, nearMissBuyingDoors, secondaryReason } from "@/lib/connector/gate";
-import { searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry, DEFAULT_SEC_USER_AGENT, readCikFromEdgarFeed } from "@/lib/connector/secondary";
+import { searchSite, harvestUrlsFromSearch, buildSearchRequest, buildOpenSearchRequest, searchOpenWeb, parseOpenHits, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry, DEFAULT_SEC_USER_AGENT, readCikFromEdgarFeed } from "@/lib/connector/secondary";
 import { buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck } from "@/lib/connector/whatsapp";
 import { asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT } from "@/lib/connector/fetch";
 
-export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, nearMissBuyingDoors, secondaryReason, collapseFormChannels, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, DEFAULT_SEC_USER_AGENT, readCikFromEdgarFeed, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT, lookupSecEdgar, lookupRegistry, registriesForCountry };
+export const api = { runConnector, extractFromPage, metaDescription, mentionsName, nameSlug, foldName, buildOpenSearchRequest, searchOpenWeb, parseOpenHits, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, buildOpenSearchRequest, searchOpenWeb, parseOpenHits, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, nearMissBuyingDoors, secondaryReason, collapseFormChannels, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, DEFAULT_SEC_USER_AGENT, readCikFromEdgarFeed, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT, lookupSecEdgar, lookupRegistry, registriesForCountry };
 `;
   await mkdir(workDir, { recursive: true });
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
@@ -1230,12 +1231,136 @@ async function runChecks(api, files) {
     formatReviewHints(nearMissRun.reviewHints).join(" | "),
   );
 
+  // ------------------------------------------------- nối nguồn thật (mới) --
+  section("tìm website khi chỉ có tên: request không giới hạn tên miền");
+
+  const openReq = api.buildOpenSearchRequest("\"Vinamilk\" official website", "tavily", "tvly-test");
+  const openBody = JSON.parse(openReq.init.body);
+  check("Tavily: câu truy vấn KHÔNG kèm site:", !String(openBody.query).includes("site:"));
+  check("Tavily: KHÔNG khoá include_domains (đang đi tìm tên miền, không phải trong nó)", openBody.include_domains === undefined);
+  const serperReq = api.buildOpenSearchRequest("\"Vinamilk\" official website", "serper", "key");
+  const serperBody = JSON.parse(serperReq.init.body);
+  check("Serper: cũng không có site:", !String(serperBody.q).includes("site:"));
+
+  // Hàng rào quen thuộc vẫn giữ: request tìm-trong-site vẫn phải có site:.
+  const scoped = api.buildSearchRequest("mariani.com", "procurement", "tavily", "tvly-test");
+  check("request tìm-trong-site vẫn giữ site: (không nới luật cũ)", String(JSON.parse(scoped.init.body).query).includes("site:mariani.com"));
+
+  const openPayload = {
+    results: [
+      { url: "https://www.linkedin.com/company/vinamilk", title: "Vinamilk" },
+      { url: "https://www.vinamilk.com.vn/", title: "Vinamilk", content: "Sữa Việt Nam" },
+      { url: "không phải url", title: "rác" },
+    ],
+  };
+  const openHits = api.parseOpenHits(openPayload, "tavily");
+  check("giữ kết quả ở tên miền KHÁC (đây là bước đi tìm tên miền)", openHits.length === 2 && openHits.some((hit) => hit.url.includes("linkedin.com")));
+  check("bỏ URL không hợp lệ", !openHits.some((hit) => hit.url.includes("không")));
+
+  section("gọi tìm kiếm: phân biệt khoá hỏng và không có kết quả");
+  const okFetch = async () => new Response(JSON.stringify({ results: [] }), { status: 200, headers: { "content-type": "application/json" } });
+  const rejectedFetch = async () => new Response(JSON.stringify({ detail: "invalid api key" }), { status: 401 });
+  const wrongShapeFetch = async () => new Response(JSON.stringify({ message: "Unauthorized" }), { status: 200, headers: { "content-type": "application/json" } });
+  const boomFetch = async () => {
+    throw new Error("getaddrinfo ENOTFOUND api.tavily.com");
+  };
+
+  const emptyOutcome = await api.searchOpenWeb("X", { apiKey: "tvly-x", fetchImpl: okFetch });
+  check("200 với mảng rỗng = tìm được, không có kết quả (khác với lỗi)", emptyOutcome.ok === true && emptyOutcome.hits.length === 0);
+  const rejectedOutcome = await api.searchOpenWeb("X", { apiKey: "tvly-x", fetchImpl: rejectedFetch });
+  check("401 là 'bị từ chối', KHÔNG phải 'không có kết quả'", rejectedOutcome.ok === false && rejectedOutcome.reason === "rejected");
+  const shapeOutcome = await api.searchOpenWeb("X", { apiKey: "tvly-x", fetchImpl: wrongShapeFetch });
+  check("HTTP 200 kèm thân lỗi vẫn bị coi là lỗi", shapeOutcome.ok === false && shapeOutcome.reason === "shape");
+  const networkOutcome = await api.searchOpenWeb("X", { apiKey: "tvly-x", fetchImpl: boomFetch });
+  check("lỗi mạng cũng trả về lý do, không im lặng", networkOutcome.ok === false && networkOutcome.reason === "network");
+  const noKeyOutcome = await api.searchOpenWeb("X", { apiKey: "" });
+  check("không có khoá ⇒ nói thẳng là thiếu khoá", noKeyOutcome.ok === false && noKeyOutcome.reason === "no_key");
+
+  section("đối chiếu tên: chỉ một chiều, không kết luận sai");
+  check("bỏ dấu và ký tự phân cách", api.mentionsName("CÔNG TY CỔ PHẦN SỮA VIỆT NAM", "Cong ty co phan sua viet nam") === true);
+  check("khớp qua gạch nối", api.mentionsName("<p>Sun-Maid Growers</p>", "Sun Maid") === true);
+  check("tên dài hơn nhãn vẫn nhận ra", api.mentionsName("Welcome to Sunmaid", "Sun-Maid Growers Of California") === true);
+  check("không có tên trên trang ⇒ false (chỉ để hạ nhãn, không phải kết luận sai website)", api.mentionsName("Welcome to our shop", "Vinamilk") === false);
+  check("tên quá ngắn thì không dò (tránh khớp vu vơ)", api.mentionsName("Acme Machinery", "AC") === false);
+  check("nameSlug ổn định cho tiếng Việt có dấu", api.nameSlug("Sữa Việt Nam") === "suavietnam", api.nameSlug("Sữa Việt Nam"));
+
+  section("mô tả công ty: lấy nguyên văn của website");
+  check(
+    "đọc meta description",
+    api.metaDescription('<html><head><meta name="description" content="Vinamilk là công ty sữa hàng đầu Việt Nam."></head></html>') === "Vinamilk là công ty sữa hàng đầu Việt Nam.",
+  );
+  check(
+    "đọc cả og:description",
+    api.metaDescription('<meta property="og:description" content="Nhà máy sữa tại Bình Dương và Nghệ An." />') === "Nhà máy sữa tại Bình Dương và Nghệ An.",
+  );
+  check("trang không khai báo ⇒ trả rỗng, KHÔNG tự viết mô tả", api.metaDescription("<html><body>Xin chào</body></html>") === "");
+
+  section("một lần chạy có tên công ty: xác nhận tên + hạn chót");
+  const identityRun = await api.runConnector("mariani.com", {
+    fetchImpl: mockFetch,
+    maxPages: 5,
+    delayMs: 0,
+    guard: noGuard,
+    companyName: "Mariani Packing",
+    log: () => {},
+  });
+  check("tên công ty có trên trang đã đọc ⇒ identityMatched = true", identityRun.identityMatched === true, String(identityRun.identityMatched));
+  check("fixture không khai báo meta ⇒ report không có mô tả (không tự viết)", identityRun.description === undefined, JSON.stringify(identityRun.description));
+
+  const strangerRun = await api.runConnector("mariani.com", {
+    fetchImpl: mockFetch,
+    maxPages: 5,
+    delayMs: 0,
+    guard: noGuard,
+    companyName: "Vina Ngoc Phat Foodstuff",
+    log: () => {},
+  });
+  check("tên không có trên trang ⇒ identityMatched = false (không phải undefined)", strangerRun.identityMatched === false);
+
+  const noNameRun = await api.runConnector("mariani.com", { fetchImpl: mockFetch, maxPages: 2, delayMs: 0, guard: noGuard, log: () => {} });
+  check("không đưa tên công ty ⇒ không kết luận gì về danh tính", noNameRun.identityMatched === undefined);
+
+  // Trang có khai báo meta description thật: report lấy nguyên câu đó + URL.
+  const describedFetch = async (url) =>
+    new Response('<html><head><meta name="description" content="Nhà máy sữa tại Bình Dương và Nghệ An."></head><body>Vinamilk Việt Nam</body></html>', {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+      url: String(url),
+    });
+  const describedRun = await api.runConnector("vinamilk.com.vn", {
+    fetchImpl: describedFetch,
+    maxPages: 1,
+    delayMs: 0,
+    guard: noGuard,
+    companyName: "Vinamilk",
+    log: () => {},
+  });
+  check(
+    "mô tả lấy nguyên văn câu của website, kèm URL trang đã đọc",
+    describedRun.description?.text === "Nhà máy sữa tại Bình Dương và Nghệ An." && (describedRun.description?.sourceUrl ?? "").includes("vinamilk.com.vn"),
+    JSON.stringify(describedRun.description),
+  );
+  check("và tên công ty trên trang đó được xác nhận", describedRun.identityMatched === true);
+
+  const deadlineRun = await api.runConnector("mariani.com", {
+    fetchImpl: mockFetch,
+    maxPages: 5,
+    delayMs: 0,
+    guard: noGuard,
+    deadlineAt: Date.now() - 1,
+    log: () => {},
+  });
+  check("hết thời gian ⇒ dừng trước khi đọc trang nào", deadlineRun.pagesFetched === 0, String(deadlineRun.pagesFetched));
+  check("và nói rõ vì sao dừng, không im lặng trả rỗng", typeof deadlineRun.stoppedEarly === "string" && deadlineRun.stoppedEarly.includes("hết thời gian"), String(deadlineRun.stoppedEarly));
+  check("có ghi chú cho người kiểm đọc", deadlineRun.notes.some((note) => note.detail.includes("chưa đầy đủ")));
+
   section("đầu vào sai");
   const bad = await api.runConnector("", { fetchImpl: mockFetch, delayMs: 0, guard: noGuard, log: () => {} }).then(() => false).catch(() => true);
   check("tên miền rỗng bị từ chối", bad);
   check("chuẩn hoá tên miền", api.normalizeSeed("mariani.com") === "https://mariani.com" && api.normalizeSeed("http://a.com/x/") === "http://a.com/x");
 
   return true;
+
 }
 
 main().catch(async (error) => {

@@ -25,8 +25,8 @@ import { initialReports } from "@/lib/demo-data";
 import { getCopy, normalizeLocale } from "@/lib/i18n";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { useWorkspace } from "@/components/workspace-provider";
-import { DEMO_CREDITS, REPORT_COST } from "@/lib/data/workspace-types";
-import { RESEARCH_PROVIDER, researchCreditCost } from "@/lib/data/research-provider";
+import { DEMO_CREDITS } from "@/lib/data/workspace-types";
+
 
 function useWorkspaceCopy() {
   const params = useParams<{ locale?: string }>();
@@ -99,7 +99,7 @@ export function BillingPage() {
   const { locale, t } = useWorkspaceCopy();
   const workspace = useWorkspace();
   const credits = workspace.account?.credits ?? DEMO_CREDITS;
-  const reportCost = researchCreditCost(RESEARCH_PROVIDER, REPORT_COST);
+  const reportCost = workspace.research.cost;
   // Real rows from credit_ledger. An empty list means the account has no
   // ledger rows — it must never be padded with invented transactions.
   const ledger = workspace.ledger ?? [];

@@ -33,6 +33,7 @@
  */
 
 import { extractFromLines, extractFromPage } from "./extract";
+import { mentionsName } from "./identity";
 import { fetchPage } from "./fetch";
 import { pdfToLines } from "./pdf";
 import { planDiscovery, normalizeSeed, hostOf, type DiscoveryOptions } from "./discover";
@@ -88,6 +89,13 @@ export type RunConnectorOptions = DiscoveryOptions & {
    * chưa tìm được kênh nào thuộc nhóm mua hàng. `false` để tắt hẳn.
    */
   secondary?: boolean | SecondaryOptions;
+  /**
+   * Hạn chót (epoch ms) cho cả lần chạy. Hết hạn thì dừng **giữa các trang** và
+   * trả về phần đã đọc, kèm `stoppedEarly` — trên server có giới hạn thời gian
+   * của nền tảng, và một kết quả nói rõ "chưa đọc hết" tốt hơn một request chết
+   * không có gì. Không đặt thì chạy hết kế hoạch như trước.
+   */
+  deadlineAt?: number;
 };
 
 const DEFAULT_TARGETS: TargetFamily[] = ["email", "phone", "whatsapp", "linkedin", "form"];
@@ -154,6 +162,23 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
   let requirements: Requirement[] = [];
   let pagesFetched = 0;
   let registry: RegistryFinding | undefined;
+  const nameToConfirm = options.companyName?.trim() ?? "";
+  let identityMatched: boolean | undefined = nameToConfirm ? false : undefined;
+  let siteDescription: { text: string; sourceUrl: string } | undefined;
+  let stoppedEarly: string | undefined;
+
+  const deadlineReached = () => options.deadlineAt !== undefined && Date.now() >= options.deadlineAt;
+  const stopBecauseDeadline = (stage: string) => {
+    if (stoppedEarly) return true;
+    if (!deadlineReached()) return false;
+    stoppedEarly = `hết thời gian cho phép khi đang ${stage}`;
+    notes.push({
+      kind: "skipped",
+      label: stage,
+      detail: `${stoppedEarly} — kết quả dưới đây là phần đã đọc được, chưa đầy đủ.`,
+    });
+    return true;
+  };
 
   plan.skipped.forEach((entry) => {
     pages.push({ url: entry.url, status: "skipped", reason: entry.reason, channels: 0 });
@@ -209,6 +234,8 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
 
     const extracted = extractFromPage({ url: outcome.finalUrl, html: outcome.body, targets, country });
     absorb(extracted);
+    if (identityMatched === false && mentionsName(outcome.body, nameToConfirm)) identityMatched = true;
+    if (!siteDescription && extracted.description) siteDescription = { text: extracted.description, sourceUrl: outcome.finalUrl };
     pages.push({ url: outcome.finalUrl, status: outcome.status, channels: extracted.channels.length, kind: "html" });
   };
 
@@ -252,6 +279,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
   log(`đọc ${htmlUrls.length} trang trên ${domain}${plan.sitemapFound ? " (có sitemap)" : ""}`);
 
   for (const url of htmlUrls) {
+    if (stopBecauseDeadline("đọc các trang chính")) break;
     await crawlPage(url);
     if (delayMs > 0) await sleep(delayMs);
   }
@@ -260,6 +288,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
   if (documentUrls.length > 0) log(`đọc ${documentUrls.length} tài liệu PDF trên ${domain}`);
 
   for (const url of documentUrls) {
+    if (stopBecauseDeadline("đọc tài liệu PDF")) break;
     await crawlDocument(url);
     if (delayMs > 0) await sleep(delayMs);
   }
@@ -273,7 +302,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
     registriesQueried: [],
   };
 
-  if (secondaryEnabled && runReason) {
+  if (secondaryEnabled && runReason && !stopBecauseDeadline("bước nguồn cấp 2")) {
     const searchApiKey = secondaryOptions.searchApiKey ?? process.env.SEARCH_API_KEY;
     const companiesHouseApiKey = secondaryOptions.companiesHouseApiKey ?? process.env.COMPANIES_HOUSE_API_KEY;
     const secUserAgent = secondaryOptions.secUserAgent ?? process.env.SEC_USER_AGENT;
@@ -330,10 +359,12 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
     const nextDocuments = extraDocuments.slice(0, Math.min(maxExtra, DEFAULT_SECONDARY_DOCUMENTS)).filter(allowedExtra);
 
     for (const url of nextPages) {
+      if (stopBecauseDeadline("đọc thêm nguồn cấp 2")) break;
       await crawlPage(url);
       if (delayMs > 0) await sleep(delayMs);
     }
     for (const url of nextDocuments) {
+      if (stopBecauseDeadline("đọc thêm tài liệu nguồn cấp 2")) break;
       await crawlDocument(url);
       if (delayMs > 0) await sleep(delayMs);
     }
@@ -411,6 +442,9 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
     secondary: secondaryReport,
     notes: dedupedNotes,
     pagesFetched,
+    ...(identityMatched === undefined ? {} : { identityMatched }),
+    ...(siteDescription ? { description: siteDescription } : {}),
+    ...(stoppedEarly ? { stoppedEarly } : {}),
   };
 }
 

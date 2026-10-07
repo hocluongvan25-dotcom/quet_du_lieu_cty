@@ -435,8 +435,29 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
   return { channels, people, requirements, notes };
 }
 
+/**
+ * Câu mô tả **của chính website** — nguyên văn, dùng làm phần giới thiệu công ty.
+ *
+ * Chỉ đọc thẻ meta; không viết lại, không tóm tắt, không suy diễn. Trang không
+ * khai báo thì trả về chuỗi rỗng, và report không có phần mô tả — thiếu còn hơn
+ * tự nghĩ ra một câu nghe hợp lý.
+ */
+export function metaDescription(html: string): string {
+  const tags = html.match(/<meta\s[^>]*>/gi) ?? [];
+  for (const tag of tags) {
+    const name = tag.match(/\b(?:name|property)\s*=\s*["']([^"']+)["']/i)?.[1]?.toLowerCase();
+    if (name !== "description" && name !== "og:description") continue;
+    const content = tag.match(/\bcontent\s*=\s*["']([^"']*)["']/i)?.[1];
+    const text = decodeEntities(content ?? "").replace(/\s+/g, " ").trim();
+    if (text.length >= 20) return text.slice(0, 400);
+  }
+  return "";
+}
+
 export function extractFromPage({ url, html, targets = ["email", "phone", "whatsapp", "linkedin", "form"], country = null }: ExtractInput): PageExtraction {
-  return extractFromLines({ url, lines: htmlToLines(html), kind: "html", html, targets, country });
+  const extraction = extractFromLines({ url, lines: htmlToLines(html), kind: "html", html, targets, country });
+  const description = metaDescription(html);
+  return description ? { ...extraction, description } : extraction;
 }
 
 export function isLoginWall(url: string): boolean {

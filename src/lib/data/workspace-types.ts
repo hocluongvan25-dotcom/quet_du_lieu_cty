@@ -29,12 +29,24 @@ export type WorkspaceAccount = {
   role: string;
 };
 
+/**
+ * Provider đang chạy cho lượt research tiếp theo, và giá của nó. Nằm trong
+ * snapshot vì UI phải nói đúng: báo cáo mẫu thì ghi "không trừ credits", provider
+ * thật thì ghi giá thật.
+ */
+export type WorkspaceResearch = {
+  provider: "demo" | "connector";
+  cost: number;
+  reason: string;
+};
+
 export type WorkspaceSnapshot = {
   state: WorkspaceState;
   account: WorkspaceAccount | null;
   reports: CompanyReport[];
   /** Real rows from credit_ledger, newest first. Empty means no rows were read. */
   ledger: LedgerView[];
+  research: WorkspaceResearch;
 };
 
 export type WorkspaceMember = {
@@ -73,4 +85,9 @@ export const emptyWorkspace: WorkspaceSnapshot = {
   account: null,
   reports: [],
   ledger: [],
+  research: {
+    provider: "demo",
+    cost: 0,
+    reason: "chưa đăng nhập — báo cáo mẫu, không đọc nguồn công khai",
+  },
 };

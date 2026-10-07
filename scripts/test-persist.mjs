@@ -388,7 +388,9 @@ async function main() {
     `import { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOURCE_KEY } from "@/lib/connector/persist";
 import { importCustomsCsv } from "@/lib/customs/import";
 import { toBuyerCustomsByBuyer, toCustomsQueueItem } from "@/lib/customs/view";
-export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOURCE_KEY, importCustomsCsv, toBuyerCustomsByBuyer, toCustomsQueueItem };
+import { buildConnectorReport } from "@/lib/data/connector-report";
+import { toCompanyReportView } from "@/lib/data/report-view";
+export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOURCE_KEY, importCustomsCsv, toBuyerCustomsByBuyer, toCustomsQueueItem, buildConnectorReport, toCompanyReportView };
 `,
     "utf8",
   );
@@ -568,6 +570,124 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
     "cả hai report đều nằm trong company_reports",
     (await db.query("select count(*)::int as n from public.company_reports where organization_id = $1", [realOrgId])).rows[0].n === 2,
   );
+
+  // ------------------------- 2c. report thật: từ kết quả connector tới UI -----
+  // Đây là đường đi thật của một lần research: connector đọc trang → dựng report
+  // → ghi bằng đúng hàm RPC của app → đọc lại bằng đúng hàm view của app. Nếu
+  // một mắt nào đứt, report thật sẽ hiện ra như report rỗng hoặc mang nhãn mẫu.
+  const realResult = {
+    seedUrl: "https://vinamilk.com.vn",
+    domain: "vinamilk.com.vn",
+    pages: [
+      { url: "https://vinamilk.com.vn", status: 200, channels: 2, kind: "html" },
+      { url: "https://vinamilk.com.vn/lien-he", status: 200, channels: 1, kind: "html" },
+      { url: "https://vinamilk.com.vn/tuyen-dung", status: 404, channels: 0, kind: "html" },
+    ],
+    channels: [
+      {
+        type: "email",
+        value: "purchasing@vinamilk.com.vn",
+        label: "Email bộ phận mua hàng",
+        identityMatch: "department",
+        certainty: "confirmed",
+        policy: "outreach_ready",
+        sourceUrl: "https://vinamilk.com.vn/lien-he",
+        evidenceSnippet: "Phòng mua hàng: purchasing@vinamilk.com.vn",
+      },
+      {
+        type: "phone",
+        value: "+84 28 5416 1111",
+        label: "Điện thoại",
+        identityMatch: "company_general",
+        certainty: "confirmed",
+        policy: "outreach_ready",
+        sourceUrl: "https://vinamilk.com.vn/lien-he",
+        evidenceSnippet: "Tổng đài: +84 28 5416 1111",
+      },
+    ],
+    people: [
+      {
+        id: "p1",
+        name: "Nguyen Van A",
+        title: "Procurement Manager",
+        sourceUrl: "https://vinamilk.com.vn/lien-he",
+        evidenceSnippet: "Nguyen Van A — Procurement Manager",
+        channelValues: ["a.nguyen@vinamilk.com.vn"],
+      },
+    ],
+    requirements: [],
+    reviewHints: [],
+    notes: [{ kind: "not_found", label: "WhatsApp", detail: "Không thấy số WhatsApp nào trên trang." }],
+    pagesFetched: 2,
+    identityMatched: true,
+    description: { text: "Vinamilk là công ty sữa Việt Nam.", sourceUrl: "https://vinamilk.com.vn" },
+    secondary: { ran: false, reason: "nguồn cấp 1 đã có cửa mua hàng", registriesQueried: [] },
+  };
+
+  const builtReal = api.buildConnectorReport({
+    companyName: "Vinamilk",
+    country: "Vietnam",
+    result: realResult,
+    locale: "vi",
+    resolvedFrom: { url: "https://www.vinamilk.com.vn/", why: ["tên công ty nằm trong tên miền"] },
+    retentionDays: 30,
+  });
+
+  await db.query(
+    `select public.complete_research_job(
+       p_organization_id => $1, p_input_company_name => 'Vinamilk',
+       p_report => $2::jsonb, p_evidence => $3::jsonb, p_cost => 5, p_retention_days => 30)`,
+    [
+      realOrgId,
+      JSON.stringify({
+        ...builtReal.columns,
+        company_name: builtReal.report.companyName,
+        country: builtReal.report.country,
+        industry: builtReal.report.industry,
+        description: builtReal.report.description,
+        confidence: builtReal.report.confidence,
+        report_data: {
+          signals: builtReal.report.signals,
+          requirements: [],
+          provider: "connector",
+          contacts: builtReal.report.contacts,
+          people: builtReal.report.people,
+          provenance: builtReal.provenance,
+        },
+        provider_trace: { provider: "public-web-connector", domain: realResult.domain },
+      }),
+      JSON.stringify(builtReal.evidence),
+    ],
+  );
+
+  const realRow = (
+    await db.query("select * from public.company_reports where organization_id = $1 and company_name = 'Vinamilk'", [realOrgId])
+  ).rows[0];
+  const realEvidence = (
+    await db.query("select * from public.source_evidence where company_report_id = $1", [realRow.id])
+  ).rows;
+  const realView = api.toCompanyReportView({ report: realRow, evidence: realEvidence, locale: "vi" });
+
+  check("report thật ghi được vào company_reports", Boolean(realRow?.id));
+  check("cột email giữ hộp thư bộ phận", realRow.public_business_email === "purchasing@vinamilk.com.vn", String(realRow.public_business_email));
+  check("cột điện thoại giữ số tổng đài", realRow.public_business_phone === "+84 28 5416 1111", String(realRow.public_business_phone));
+  check("bằng chứng được ghi kèm câu chữ gốc", realEvidence.some((row) => row.evidence_snippet === "Phòng mua hàng: purchasing@vinamilk.com.vn"));
+  check("bằng chứng trỏ đúng URL trang đã thấy giá trị", realEvidence.some((row) => row.source_url === "https://vinamilk.com.vn/lien-he" && row.field_name === "public_business_email"));
+  check("report thật KHÔNG mang nhãn dữ liệu mẫu khi đọc lại", realView.sampleData === undefined);
+  check("mô tả của website sống qua vòng ghi/đọc", realView.description === "Vinamilk là công ty sữa Việt Nam.");
+  check("không phải report mẫu ⇒ giữ nguyên tên công ty thật", realView.companyName === "Vinamilk");
+  check(
+    "mọi kênh tìm được vẫn còn sau khi ghi (không chỉ kênh lên cột)",
+    realView.contacts.some((contact) => contact.value === "purchasing@vinamilk.com.vn"),
+  );
+  check(
+    "kênh giữ cả nhãn chính sách dùng và URL nguồn sau khi đọc lại",
+    realView.contacts.some((contact) => contact.value === "purchasing@vinamilk.com.vn" && contact.policy === "outreach_ready" && contact.sourceUrl === "https://vinamilk.com.vn/lien-he"),
+  );
+  check("người ra quyết định vẫn còn sau khi ghi", (realView.people ?? []).some((person) => person.name === "Nguyen Van A"));
+  check("nguồn hiển thị là trang thật đã đọc", realView.sources.some((source) => source.url === "https://vinamilk.com.vn/lien-he"));
+  check("chỉ số tin cậy là số đếm được, không phải 100", realView.confidence > 25 && realView.confidence <= 90, String(realView.confidence));
+  check("giá đã trừ đúng 5 credits cho report thật", (await db.query("select credits_balance from public.organizations where id = $1", [realOrgId])).rows[0].credits_balance === 40, String((await db.query("select credits_balance from public.organizations where id = $1", [realOrgId])).rows[0].credits_balance));
 
   let nullCostRejected = false;
   try {

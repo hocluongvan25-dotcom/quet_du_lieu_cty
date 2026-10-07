@@ -115,6 +115,19 @@ export type ConnectorResult = {
   notes: ConnectorNote[];
   /** Số trang đã tải thực tế. */
   pagesFetched: number;
+  /**
+   * Tên công ty (do người dùng nhập) có xuất hiện trên một trang đã đọc không.
+   * Chỉ có khi lần chạy được đưa tên công ty. `false` = chưa xác nhận được danh
+   * tính, **không** phải bằng chứng là sai website.
+   */
+  identityMatched?: boolean;
+  /** Câu mô tả của website, kèm trang đã đọc nó — nội dung gốc, không diễn giải. */
+  description?: { text: string; sourceUrl: string };
+  /**
+   * Lần chạy dừng sớm vì hết thời gian cho phép, và đã dừng ở đâu. Kết quả trả
+   * về là phần đã đọc được — người dùng phải được biết nó chưa đầy đủ.
+   */
+  stoppedEarly?: string;
 };
 
 export type TargetFamily = "email" | "phone" | "whatsapp" | "linkedin" | "form";
@@ -124,4 +137,6 @@ export type PageExtraction = {
   people: FoundPerson[];
   requirements: Requirement[];
   notes: ConnectorNote[];
+  /** Câu mô tả của chính website (meta description / og:description), nguyên văn. */
+  description?: string;
 };

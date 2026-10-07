@@ -208,6 +208,94 @@ export async function searchSite(domain: string, query: string, options: SearchO
   }
 }
 
+// --------------------------------------------- tìm website khi chỉ có tên ---
+
+/**
+ * Câu truy vấn **không** giới hạn tên miền. Cả file này chỉ có đúng một việc
+ * được phép dùng nó: **tìm ra website của công ty** khi người dùng gõ tên. Sau
+ * khi biết tên miền, mọi bước sau quay lại luật cũ — chỉ đọc trang của chính
+ * công ty đó.
+ */
+export function buildOpenSearchRequest(query: string, provider: SearchProvider, apiKey: string): { url: string; init: RequestInit } {
+  if (provider === "serper") {
+    return {
+      url: "https://google.serper.dev/search",
+      init: { method: "POST", headers: { "content-type": "application/json", "x-api-key": apiKey }, body: JSON.stringify({ q: query, num: 10 }) },
+    };
+  }
+
+  if (provider === "tavily") {
+    return {
+      url: "https://api.tavily.com/search",
+      init: {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ query, max_results: 10, search_depth: "basic" }),
+      },
+    };
+  }
+
+  return {
+    url: `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=10`,
+    init: { headers: { accept: "application/json", "x-subscription-token": apiKey } },
+  };
+}
+
+/** Mọi kết quả nhà cung cấp trả về, **không** lọc tên miền — giữ nguyên thứ tự. */
+export function parseOpenHits(payload: unknown, provider: SearchProvider): SearchHit[] {
+  const hits: SearchHit[] = [];
+  for (const row of rawRows(payload, provider)) {
+    const url = row.url ?? row.link;
+    if (!url) continue;
+    try {
+      new URL(url);
+    } catch {
+      continue;
+    }
+    hits.push({ url, title: row.title ?? row.name ?? "", snippet: row.snippet ?? row.description ?? row.content ?? "" });
+  }
+  return hits;
+}
+
+export type OpenSearchOutcome =
+  | { ok: true; provider: SearchProvider; hits: SearchHit[] }
+  | { ok: false; provider: SearchProvider | null; reason: "no_key" | "rejected" | "http" | "shape" | "network"; detail: string };
+
+/**
+ * Tìm trên toàn internet — **chỉ để tìm website công ty**.
+ *
+ * Trả về thất bại kèm lý do cụ thể thay vì mảng rỗng, vì ba chuyện rất khác
+ * nhau: chưa có khoá, khoá bị từ chối, và "tìm được nhưng không có kết quả".
+ * Gộp chúng thành mảng rỗng là cách chắc chắn nhất để người dùng hiểu sai.
+ */
+export async function searchOpenWeb(query: string, options: SearchOptions = {}): Promise<OpenSearchOutcome> {
+  const provider = resolveProvider(options.apiKey, options.provider);
+  const apiKey = (options.apiKey ?? "").trim();
+  if (!provider || !apiKey) return { ok: false, provider: null, reason: "no_key", detail: "chưa có khoá tìm kiếm" };
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+  try {
+    const request = buildOpenSearchRequest(query, provider, apiKey);
+    const response = await fetchImpl(request.url, request.init);
+    if (!response.ok) {
+      const rejected = response.status === 401 || response.status === 403;
+      return {
+        ok: false,
+        provider,
+        reason: rejected ? "rejected" : "http",
+        detail: rejected ? `HTTP ${response.status} — nhà cung cấp từ chối khoá` : `HTTP ${response.status}`,
+      };
+    }
+    const payload = await response.json();
+    if (!hasSearchShape(payload, provider)) {
+      return { ok: false, provider, reason: "shape", detail: "phản hồi không phải kết quả tìm kiếm" };
+    }
+    return { ok: true, provider, hits: parseOpenHits(payload, provider) };
+  } catch (error) {
+    return { ok: false, provider, reason: "network", detail: error instanceof Error ? error.message : "không rõ" };
+  }
+}
+
 /** Những câu hỏi dùng cho nguồn cấp 2, theo thứ tự ưu tiên. */
 export const SECONDARY_QUERIES = [
   "supplier registration",

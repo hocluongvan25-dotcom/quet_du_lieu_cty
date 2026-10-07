@@ -1,4 +1,4 @@
-import type { CompanyReport, Contact, ReportStatus, Source } from "@/lib/demo-data";
+import type { CompanyReport, Contact, DecisionMaker, ReportStatus, Source } from "@/lib/demo-data";
 import type { AppLocale } from "@/lib/i18n";
 import type { Requirement, RequirementCategory } from "@/lib/requirements";
 
@@ -185,6 +185,68 @@ function readRequirements(reportData: unknown): Requirement[] {
   });
 }
 
+/**
+ * Đọc lại danh sách kênh **đầy đủ** đã lưu trong `report_data`.
+ *
+ * Bảng `company_reports` chỉ có một cột cho mỗi loại kênh (một email, một số
+ * điện thoại…), nên nếu chỉ đọc các cột đó thì mọi kênh thừa — cùng câu chữ
+ * bằng chứng, cùng nhãn tin cậy, cùng chính sách dùng — biến mất sau khi ghi.
+ * Connector tìm được bao nhiêu kênh thì report phải giữ bấy nhiêu.
+ */
+function readContacts(reportData: unknown): Contact[] {
+  if (!reportData || typeof reportData !== "object") return [];
+  const raw = (reportData as { contacts?: unknown }).contacts;
+  if (!Array.isArray(raw)) return [];
+  const allowedTypes = new Set<Contact["type"]>(["website", "email", "phone", "linkedin", "whatsapp"]);
+  const allowedCertainty = new Set(["confirmed", "probable", "inferred"]);
+  const allowedIdentity = new Set(["person", "department", "company_general", "unknown"]);
+  const allowedPolicy = new Set(["outreach_ready", "needs_mailbox_check", "manual_contact_only", "requires_override"]);
+
+  return raw.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as Partial<Contact>;
+    if (!item.label || !item.value || !item.type || !allowedTypes.has(item.type)) return [];
+    return [{
+      label: String(item.label),
+      value: String(item.value),
+      type: item.type,
+      verified: Boolean(item.verified),
+      source: String(item.source ?? ""),
+      ...(allowedCertainty.has(item.certainty as string) ? { certainty: item.certainty } : {}),
+      ...(allowedIdentity.has(item.identityMatch as string) ? { identityMatch: item.identityMatch } : {}),
+      ...(allowedPolicy.has(item.policy as string) ? { policy: item.policy } : {}),
+      ...(item.via ? { via: String(item.via) } : {}),
+      ...(item.sourceUrl ? { sourceUrl: String(item.sourceUrl) } : {}),
+      ...(item.personName ? { personName: String(item.personName) } : {}),
+      ...(item.personTitle ? { personTitle: String(item.personTitle) } : {}),
+    }];
+  });
+}
+
+/** Người ra quyết định đã lưu trong `report_data` — cùng lý do như `readContacts`. */
+function readPeople(reportData: unknown): DecisionMaker[] {
+  if (!reportData || typeof reportData !== "object") return [];
+  const raw = (reportData as { people?: unknown }).people;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as Partial<DecisionMaker>;
+    if (!item.name || !item.sourceUrl) return [];
+    return [{
+      id: String(item.id ?? `person-${item.name}`),
+      name: String(item.name),
+      title: String(item.title ?? ""),
+      department: String(item.department ?? ""),
+      identityMatch: "person" as const,
+      certainty: "confirmed" as const,
+      sourceLabel: String(item.sourceLabel ?? ""),
+      sourceUrl: String(item.sourceUrl),
+      lastSeenAt: String(item.lastSeenAt ?? ""),
+      channels: Array.isArray(item.channels) ? item.channels : [],
+    }];
+  });
+}
+
 function readSignals(reportData: unknown): string[] {
   if (!reportData || typeof reportData !== "object") return [];
   const signals = (reportData as { signals?: unknown }).signals;
@@ -258,9 +320,12 @@ export function toCompanyReportView(options: {
         : "This report has no description from a public source yet."),
     website: report.official_website?.replace(/^https?:\/\//, "") ?? undefined,
     lastUpdated: formatMoment(report.captured_at, locale),
-    contacts,
+    // Danh sách đầy đủ trong `report_data` thắng các cột đơn lẻ — nhưng chỉ khi
+    // thật sự có, để report cũ (và report mẫu) giữ nguyên hành vi.
+    contacts: readContacts(report.report_data).length > 0 ? readContacts(report.report_data) : contacts,
     requirements: readRequirements(report.report_data),
     sources,
     signals: signals.length > 0 ? signals : [locale === "vi" ? "Có evidence nguồn" : "Source evidence attached"],
+    ...(readPeople(report.report_data).length > 0 ? { people: readPeople(report.report_data) } : {}),
   };
 }

@@ -4,6 +4,8 @@ import { getSupabasePublicConfig } from "@/lib/supabase/config";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import type { AppLocale } from "@/lib/i18n";
 import { toCompanyReportView, toLedgerView, type CompanyReportRow, type LedgerRow, type SourceEvidenceRow } from "./report-view";
+import { researchForEnv } from "./research-provider";
+import { REPORT_COST, emptyWorkspace as demoWorkspace, type WorkspaceResearch } from "./workspace-types";
 import {
   toReportChange,
   toWorkspaceMember,
@@ -76,6 +78,9 @@ export function initialsFromName(value: string) {
  * Resolves the signed-in user's workspace. Returns `null` when the user has no
  * membership yet, which means onboarding still has to run.
  */
+/** Provider mẫu: dùng cho mọi nhánh **chưa** vào được workspace thật. */
+const demoResearch: WorkspaceResearch = demoWorkspace.research;
+
 export async function fetchWorkspaceAccount(
   supabase: SupabaseClient,
   user: User,
@@ -126,18 +131,18 @@ export const loadWorkspace = cache(async (locale: AppLocale): Promise<WorkspaceS
     if (error) {
       // No session cookie is a normal anonymous visit, not an outage.
       const isMissingSession = error.name === "AuthSessionMissingError" || error.status === 400;
-      if (!isMissingSession) return { state: "unavailable", account: null, ledger: [], reports: [] };
+      if (!isMissingSession) return { state: "unavailable", account: null, ledger: [], reports: [], research: demoResearch };
     }
     user = data.user ?? null;
   } catch {
-    return { state: "unavailable", account: null, ledger: [], reports: [] };
+    return { state: "unavailable", account: null, ledger: [], reports: [], research: demoResearch };
   }
 
   if (!user) return emptyWorkspace;
 
   try {
     const account = await fetchWorkspaceAccount(supabase, user);
-    if (!account) return { state: "onboarding", account: null, ledger: [], reports: [] };
+    if (!account) return { state: "onboarding", account: null, ledger: [], reports: [], research: demoResearch };
 
     // Read the ledger before anything can return early: a workspace with no
     // reports still has its starter grant in the ledger.
@@ -160,7 +165,7 @@ export const loadWorkspace = cache(async (locale: AppLocale): Promise<WorkspaceS
     if (reportError) throw new Error(reportError.message);
 
     const reports = (reportRows ?? []) as unknown as CompanyReportRow[];
-    if (reports.length === 0) return { state: "live", account, ledger, reports: [] };
+    if (reports.length === 0) return { state: "live", account, ledger, reports: [], research: researchForEnv(REPORT_COST) };
 
     const { data: evidenceRows, error: evidenceError } = await supabase
       .from("source_evidence")
@@ -178,6 +183,7 @@ export const loadWorkspace = cache(async (locale: AppLocale): Promise<WorkspaceS
       state: "live",
       account,
       ledger,
+      research: researchForEnv(REPORT_COST),
       reports: reports.map((report) =>
         toCompanyReportView({
           report,
@@ -187,7 +193,7 @@ export const loadWorkspace = cache(async (locale: AppLocale): Promise<WorkspaceS
       ),
     };
   } catch {
-    return { state: "unavailable", account: null, ledger: [], reports: [] };
+    return { state: "unavailable", account: null, ledger: [], reports: [], research: demoResearch };
   }
 });
 

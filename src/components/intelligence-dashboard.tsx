@@ -46,8 +46,8 @@ import { WorkspaceNotice } from "@/components/workspace-notice";
 import { PeoplePanel, RequirementsPanel } from "@/components/contact-intel";
 import { CustomsHistory } from "@/components/customs-blocks";
 import { buildReportSections } from "@/lib/report-sections";
-import { DEMO_CREDITS, REPORT_COST, type WorkspaceSnapshot } from "@/lib/data/workspace-types";
-import { RESEARCH_PROVIDER, researchCreditCost } from "@/lib/data/research-provider";
+import { DEMO_CREDITS, type WorkspaceSnapshot } from "@/lib/data/workspace-types";
+
 import { getCopy, normalizeLocale, type AppLocale } from "@/lib/i18n";
 
 type SearchMode = "name" | "link";
@@ -176,10 +176,11 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
   const baseReports = isLive ? workspace.reports : initialReports;
   const baseCredits = account?.credits ?? DEMO_CREDITS;
   const credits = isLive ? baseCredits : Math.max(0, baseCredits - demoCreditsUsed);
-  // What a research actually costs today. Sample reports are free, so the
-  // price printed on the button must follow the provider, not a constant.
-  const reportCost = researchCreditCost(RESEARCH_PROVIDER, REPORT_COST);
-  const sampleOnly = RESEARCH_PROVIDER === "demo";
+  // Provider và giá đi cùng nhau trong snapshot: có khoá tìm kiếm thì app đọc
+  // website công khai và tính credits; chưa có thì báo cáo là dữ liệu mẫu và
+  // không trừ gì. Nút bấm phải in đúng con số đó.
+  const reportCost = workspace.research.cost;
+  const sampleOnly = workspace.research.provider === "demo";
   const reports = useMemo(() => {
     const known = new Set(baseReports.map((report) => report.id));
     return [...createdReports.filter((report) => !known.has(report.id)), ...baseReports];
@@ -230,7 +231,13 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
     setIsResearching(true);
     setProgress(12);
 
+    // Research thật đọc vài trang công khai nên có thể lâu hơn một nhịp thở;
+    // thanh tiến trình bò chậm để người dùng biết nó còn chạy, không đứng im.
+    let progressTimer = 0;
     try {
+      progressTimer = window.setInterval(() => {
+        setProgress((current) => (current > 0 && current < 92 ? current + 1 : current));
+      }, 900);
       const responsePromise = fetch("/api/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -255,6 +262,7 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
         creditsRemaining?: number;
         dataSource?: string;
         provider?: string;
+        resolved?: { domain: string; via: "link" | "search"; why: string[] } | null;
       };
 
       if (!response.ok || !result.report) throw new Error(result.error || "Không thể tạo report lúc này.");
@@ -266,7 +274,13 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
       setSelectedReport(result.report);
       setCompanyName("");
       setSourceUrl("");
-      notify(result.dataSource === "demo" ? t.dashboard.sampleNotice : t.dashboard.completed);
+      notify(
+        result.dataSource === "demo"
+          ? t.dashboard.sampleNotice
+          : result.resolved?.domain
+            ? t.dashboard.completedFrom.replace("{domain}", result.resolved.domain)
+            : t.dashboard.completed,
+      );
       if (isLive) {
         // Re-read the workspace so credits, report ids and evidence are the
         // stored rows instead of the optimistic client state.
@@ -277,6 +291,7 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Đã có lỗi xảy ra. Hãy thử lại.");
     } finally {
+      if (progressTimer) window.clearInterval(progressTimer);
       setIsResearching(false);
       setProgress(0);
     }

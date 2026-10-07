@@ -117,13 +117,32 @@ The dashboard runs in demo mode until a visitor signs in; after that it reads an
 
 `organization_id` is always derived from the signed-in user's membership inside the SQL functions, so a browser request can never choose its own workspace or price. Anonymous visitors keep the safe demo provider, and an unreachable project degrades to demo data with a visible notice instead of a broken page.
 
+### Turning real research on
+
+The app has two providers, and which one runs is decided **per request** in `src/lib/data/research-provider.ts`:
+
+| | `connector` — real research | `demo` — sample report |
+| --- | --- | --- |
+| Runs when | `SEARCH_API_KEY` is set (server-side) | no key configured, or the visitor is anonymous |
+| Does | resolves the company's website, then reads its public pages | reads nothing |
+| Costs | **5 credits** per report | **0 credits**, labelled `sampleData` |
+
+So the switch is one environment variable. With `SEARCH_API_KEY` set, a signed-in user searches a name and the app:
+
+1. asks the search API for the company's **own website** — the query is *not* scoped to a domain yet, because there is no domain. Candidates are accepted only with name evidence (the name is in the host, or in the result title), and social networks, directories, registries and news sites are refused outright (`src/lib/data/company-resolver.ts`). No candidate with evidence ⇒ a plain "not found, paste the company link" answer — **never a guess**, because guessing a domain produces a spotless report about the wrong company;
+2. runs the connector on that domain: robots.txt, sitemap and linked pages, then contact channels, requirements and people, each with the exact wording that carried it and the URL it came from;
+3. checks the name actually appears on a page it read (`src/lib/connector/identity.ts`). A miss does **not** mean "wrong company" — plenty of sites never repeat their own name — so it lowers the confidence and writes a note for the reviewer instead of asserting anything;
+4. builds the report with only countable fields (see `confidenceForConnector`), stores it with `provider: "connector"` and the full channel list, and charges 5 credits. `creditsCharged` in the response is what was actually taken.
+
+Failure is answered honestly and never becomes a free sample report: a rejected key, an unreachable search API, no website found, or a site that refuses every fetch each get their own message, and nothing is charged when nothing was read. A run that eats its 45-second budget stops between pages, returns what it read, and says so in `signals` and in the report's notes.
+
 **Stored is not the same as researched.** Today's provider is still the demo one, so a report *saved* into a real workspace is still sample content — and the app says so at every layer, because a saved row carrying "confidence 84/100" and `.example` URLs otherwise reads exactly like verified work:
 
 - every report the demo provider produces carries `sampleData: true`; the report row, the reports table and the report drawer all show a **"sample data" / "dữ liệu mẫu"** badge, and the copied summary starts with a NOTE line;
 - the provenance travels through storage: `report_data.provider = "demo"` is what the badge is read back from, so a reload or a fresh session shows the same label;
 - `src/lib/data/research-provider.ts` decides the price: `researchCreditCost("demo", 5) === 0`. Sample content never costs credits, and `POST /api/research` answers with `provider: "demo"`, `dataSource: "demo"`, `creditsCharged: 0` — `mode: "live"` means *stored in Supabase*, never *read from the web*;
 - when the real connector-backed provider lands, that file is the one line to change, and `report:test` fails if the provider and the price drift apart.
-- **the price on screen follows the provider too.** The research button, the wallet popover, the capacity estimate in the sidebar and the billing card all read `researchCreditCost(RESEARCH_PROVIDER, REPORT_COST)`, so while the provider is the demo one they say "no credits charged" instead of advertising `5 credits` the app never takes. When a real provider lands, the same number switches back without touching the copy;
+- **the price on screen follows the provider.** The research button, the wallet popover, the capacity estimate in the sidebar and the billing card all read `researchCreditCost(RESEARCH_PROVIDER, REPORT_COST)`, so while the provider is the demo one they say "no credits charged" instead of advertising `5 credits` the app never takes. When a real provider lands, the same number switches back without touching the copy;
 - **the billing page shows the real ledger.** `Credit activity` renders rows read from `credit_ledger` (every new workspace has exactly one: `Starter workspace grant` `+50`). The earlier hard-coded transaction list and the invented "October cycle · 72% remaining" bar are gone — a fabricated debit line is indistinguishable from a genuine charge, so the page shows real rows or an explicit empty state.
 
 ### Team, change monitoring and retention
@@ -218,7 +237,7 @@ Importing a file is a deliberate, reported step: `src/lib/customs/import.ts` map
 
 ```bash
 npm run export:test   # 58 checks, including re-reading the CSV with an RFC 4180 parser
-npm run report:test   # 35 checks: person channels merge onto the person card, nothing lost or invented, sample reports stay labelled and unpaid
+npm run report:test   # 65 checks: person channels merge onto the person card, nothing lost or invented, sample reports stay labelled and unpaid
 npm run requirements:test # 24 checks: supplier requirements kept verbatim, sourced, never invented
 ```
 
@@ -242,7 +261,7 @@ A line only becomes an item when it names one of those and either carries requir
 
 ```bash
 npm run requirements:test   # 24 checks: no fabrication, verbatim evidence, sources, PDF, no advice
-npm run persist:test      # 151 checks: rows built from real findings, written into a real Postgres, read back through the app's views, gated, verified, exported, WhatsApp-checked, and customs records linked end to end
+npm run persist:test      # 165 checks: rows built from real findings, written into a real Postgres, read back through the app's views, gated, verified, exported, WhatsApp-checked, and customs records linked end to end
 npm run roles:test        # 33 checks: title classification order (a procurement director is not management), other ≠ unknown
 npm run customs:test      # 105 checks: reading a customs CSV, mapping columns to fields, refusing to guess, ranking candidates
 npm run reverify:test     # 37 checks: three answers to "is this value still there", and what each one changes
