@@ -409,6 +409,17 @@ Hôm nay AI mới làm phần **nhỏ nhất**, và nên nói thẳng như vậy
 
 ---
 
+## 16. Đối chiếu với thiết kế chuẩn của người dùng (06/10/2026)
+
+Người dùng đưa một thiết kế 5 bước + 5 cổng + 3 trạng thái đầu ra và hỏi code đã theo chưa. Kết quả đối chiếu đầy đủ (kèm `file:dòng`) nằm ở [`docs/contact-candidate-pipeline-audit.md`](./contact-candidate-pipeline-audit.md). Tóm tắt:
+
+- **Đã có:** bước 2 (nguồn cấp 1, kể cả PDF), bước 4 (trích xuất có `source_url` + `evidence_snippet`, không bao giờ sinh email theo pattern), cổng Domain, và phần lớn cổng Entity.
+- **Một phần:** cổng Role (có nhận diện, chưa có cổng chặn), cổng Email (chỉ email công bố, nhưng chưa có ba nhãn `published_named` / `published_role_mailbox` / `inferred_unverified`), cổng Freshness (có `verified_at` + hạn 90 ngày, chưa có job re-verify).
+- **Chưa có:** bước 1 (resolve pháp nhân từ tờ khai hải quan — chưa có dữ liệu hải quan), bước 3 (nguồn cấp 2), và **tầng ghi kết quả connector vào database**.
+- **Chỗ lệch model:** thiết kế muốn `contact_candidates` mang `evidence_quote` + `source_urls`. Hệ thống đang tách đúng theo bản chất dữ liệu: bằng chứng nằm ở `contact_channels` (`source_url` + `evidence_snippet`, DB buộc `confirmed` phải có `source_url`), còn `contact_candidates` là **giả thuyết** với `pattern_used` + `inference_basis` bắt buộc và hạn 30 ngày. Muốn theo đúng chữ của thiết kế thì cần thêm cột, nhưng thêm bằng chứng vào bảng giả thuyết sẽ làm mờ đúng ranh giới mà migration 006 dựng lên — nên ghi lại để người dùng chọn.
+
+---
+
 ## 15. Điều kiện & giấy tờ nhà cung cấp phải đáp ứng (06/10/2026)
 
 Tiêu chí "điền đủ" từ đầu dự án: mọi điều khoản/giấy tờ nhà cung cấp phải đáp ứng đều phải hiện trong report. Phần này giờ đã chạy.

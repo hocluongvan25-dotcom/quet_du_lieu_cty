@@ -79,7 +79,7 @@ export async function POST(request: Request) {
       pages: result.pages,
       raw: { channels: result.channels, notes: result.notes },
       persisted: false,
-      note: "Kết quả chưa được lưu vào database: các bảng buyer/contact cần migration 002–006 apply trước.",
+      note: "Kết quả chưa được lưu vào database: tầng ghi buyer_profiles / contact_channels / decision_makers / buyer_routes chưa được viết (schema 002–006 đã sẵn sàng).",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Không rõ nguyên nhân";
