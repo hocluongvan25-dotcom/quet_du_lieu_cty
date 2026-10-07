@@ -34,7 +34,7 @@ function section(title) {
   console.log(`\n${title}`);
 }
 
-const entry = `export * from "@/lib/report-sections";\nexport { marianiReport } from "@/lib/demo-mariani";\nexport { createDemoReport } from "@/lib/demo-data";\nexport { toCompanyReportView } from "@/lib/data/report-view";\nexport { RESEARCH_PROVIDER, researchCreditCost } from "@/lib/data/research-provider";\n`;
+const entry = `export * from "@/lib/report-sections";\nexport { marianiReport } from "@/lib/demo-mariani";\nexport { createDemoReport } from "@/lib/demo-data";\nexport { toCompanyReportView, toLedgerView } from "@/lib/data/report-view";\nexport { RESEARCH_PROVIDER, researchCreditCost } from "@/lib/data/research-provider";\n`;
 
 await rm(workDir, { recursive: true, force: true });
 await mkdir(workDir, { recursive: true });
@@ -43,7 +43,7 @@ await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
 
 await bundleTs(path.join(workDir, "entry.ts"), bundlePath);
 
-const { buildReportSections, marianiReport, createDemoReport, toCompanyReportView, RESEARCH_PROVIDER, researchCreditCost } = await import(pathToFileURL(bundlePath).href);
+const { buildReportSections, marianiReport, createDemoReport, toCompanyReportView, toLedgerView, RESEARCH_PROVIDER, researchCreditCost } = await import(pathToFileURL(bundlePath).href);
 
 const sections = buildReportSections(marianiReport);
 
@@ -159,6 +159,33 @@ check("dòng của provider thật không mang nhãn mẫu", connectorRowView.sa
 check("provider mẫu KHÔNG trừ credits", researchCreditCost("demo", 5) === 0 && researchCreditCost(RESEARCH_PROVIDER, 5) === 0);
 check("provider thật thì tính đúng giá", researchCreditCost("connector", 5) === 5 && researchCreditCost(RESEARCH_PROVIDER === "demo" ? "connector" : "demo", 5) === 5);
 check("hằng số provider hiện tại là provider mẫu — đổi provider thì phải đổi cả chỗ này", RESEARCH_PROVIDER === "demo", RESEARCH_PROVIDER);
+
+
+section("sổ credits: chỉ hiển thị dòng đọc từ DB, không bịa giao dịch");
+
+// Tài khoản thật có đúng một dòng thật khi khởi tạo (migration 002:
+// 'Starter workspace grant', +50). Trang billing phải hiển thị chính dòng đó.
+const grantRow = {
+  id: "l1",
+  type: "credit",
+  amount: 50,
+  description: "Starter workspace grant",
+  created_at: "2026-10-07T03:00:00.000Z",
+};
+const debitRow = {
+  id: "l2",
+  type: "debit",
+  amount: 5,
+  description: "Company Report · Nova Distribution Ltd.",
+  created_at: "2026-10-07T04:00:00.000Z",
+};
+const ledgerView = toLedgerView([grantRow, debitRow], "vi");
+check("đọc đủ số dòng có trong sổ", ledgerView.length === 2);
+check("dòng cấp credits hiện dấu + và nhãn tiếng Việt", ledgerView[0].amountLabel === "+50" && ledgerView[0].direction === "in" && ledgerView[0].label === "Cấp credits");
+check("dòng trừ credits hiện dấu - và đúng nhãn", ledgerView[1].amountLabel === "-5" && ledgerView[1].direction === "out" && ledgerView[1].label === "Company Report");
+check("mô tả giữ nguyên như trong DB, không viết lại", ledgerView[0].detail === "Starter workspace grant" && ledgerView[1].detail === "Company Report · Nova Distribution Ltd.");
+check("sổ rỗng thì trả về rỗng — không tự thêm dòng mẫu nào", toLedgerView([], "vi").length === 0 && toLedgerView(null, "vi").length === 0 && toLedgerView(undefined, "en").length === 0);
+check("loại lạ vẫn hiện đúng loại đó thay vì đoán bừa", toLedgerView([{ ...grantRow, type: "manual_note" }], "en")[0].label === "manual_note");
 
 console.log(`\n${passed} check pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);

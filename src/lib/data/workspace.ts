@@ -3,7 +3,7 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { getSupabasePublicConfig } from "@/lib/supabase/config";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import type { AppLocale } from "@/lib/i18n";
-import { toCompanyReportView, type CompanyReportRow, type SourceEvidenceRow } from "./report-view";
+import { toCompanyReportView, toLedgerView, type CompanyReportRow, type LedgerRow, type SourceEvidenceRow } from "./report-view";
 import {
   toReportChange,
   toWorkspaceMember,
@@ -55,6 +55,8 @@ const REPORT_COLUMNS = [
   "expires_at",
   "research_jobs(status)",
 ].join(", ");
+
+const LEDGER_COLUMNS = "id, type, amount, description, created_at";
 
 const EVIDENCE_COLUMNS =
   "company_report_id, kind, source_label, source_url, field_name, evidence_snippet, is_verified";
@@ -124,18 +126,30 @@ export const loadWorkspace = cache(async (locale: AppLocale): Promise<WorkspaceS
     if (error) {
       // No session cookie is a normal anonymous visit, not an outage.
       const isMissingSession = error.name === "AuthSessionMissingError" || error.status === 400;
-      if (!isMissingSession) return { state: "unavailable", account: null, reports: [] };
+      if (!isMissingSession) return { state: "unavailable", account: null, ledger: [], reports: [] };
     }
     user = data.user ?? null;
   } catch {
-    return { state: "unavailable", account: null, reports: [] };
+    return { state: "unavailable", account: null, ledger: [], reports: [] };
   }
 
   if (!user) return emptyWorkspace;
 
   try {
     const account = await fetchWorkspaceAccount(supabase, user);
-    if (!account) return { state: "onboarding", account: null, reports: [] };
+    if (!account) return { state: "onboarding", account: null, ledger: [], reports: [] };
+
+    // Read the ledger before anything can return early: a workspace with no
+    // reports still has its starter grant in the ledger.
+    const { data: ledgerRows, error: ledgerError } = await supabase
+      .from("credit_ledger")
+      .select(LEDGER_COLUMNS)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (ledgerError) throw new Error(ledgerError.message);
+
+    const ledger = toLedgerView((ledgerRows ?? []) as unknown as LedgerRow[], locale);
 
     const { data: reportRows, error: reportError } = await supabase
       .from("company_reports")
@@ -146,7 +160,7 @@ export const loadWorkspace = cache(async (locale: AppLocale): Promise<WorkspaceS
     if (reportError) throw new Error(reportError.message);
 
     const reports = (reportRows ?? []) as unknown as CompanyReportRow[];
-    if (reports.length === 0) return { state: "live", account, reports: [] };
+    if (reports.length === 0) return { state: "live", account, ledger, reports: [] };
 
     const { data: evidenceRows, error: evidenceError } = await supabase
       .from("source_evidence")
@@ -163,6 +177,7 @@ export const loadWorkspace = cache(async (locale: AppLocale): Promise<WorkspaceS
     return {
       state: "live",
       account,
+      ledger,
       reports: reports.map((report) =>
         toCompanyReportView({
           report,
@@ -172,7 +187,7 @@ export const loadWorkspace = cache(async (locale: AppLocale): Promise<WorkspaceS
       ),
     };
   } catch {
-    return { state: "unavailable", account: null, reports: [] };
+    return { state: "unavailable", account: null, ledger: [], reports: [] };
   }
 });
 

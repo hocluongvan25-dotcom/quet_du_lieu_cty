@@ -123,6 +123,8 @@ The dashboard runs in demo mode until a visitor signs in; after that it reads an
 - the provenance travels through storage: `report_data.provider = "demo"` is what the badge is read back from, so a reload or a fresh session shows the same label;
 - `src/lib/data/research-provider.ts` decides the price: `researchCreditCost("demo", 5) === 0`. Sample content never costs credits, and `POST /api/research` answers with `provider: "demo"`, `dataSource: "demo"`, `creditsCharged: 0` — `mode: "live"` means *stored in Supabase*, never *read from the web*;
 - when the real connector-backed provider lands, that file is the one line to change, and `report:test` fails if the provider and the price drift apart.
+- **the price on screen follows the provider too.** The research button, the wallet popover, the capacity estimate in the sidebar and the billing card all read `researchCreditCost(RESEARCH_PROVIDER, REPORT_COST)`, so while the provider is the demo one they say "no credits charged" instead of advertising `5 credits` the app never takes. When a real provider lands, the same number switches back without touching the copy;
+- **the billing page shows the real ledger.** `Credit activity` renders rows read from `credit_ledger` (every new workspace has exactly one: `Starter workspace grant` `+50`). The earlier hard-coded transaction list and the invented "October cycle · 72% remaining" bar are gone — a fabricated debit line is indistinguishable from a genuine charge, so the page shows real rows or an explicit empty state.
 
 ### Team, change monitoring and retention
 
@@ -216,7 +218,7 @@ Importing a file is a deliberate, reported step: `src/lib/customs/import.ts` map
 
 ```bash
 npm run export:test   # 58 checks, including re-reading the CSV with an RFC 4180 parser
-npm run report:test   # 29 checks: person channels merge onto the person card, nothing lost or invented, sample reports stay labelled and unpaid
+npm run report:test   # 35 checks: person channels merge onto the person card, nothing lost or invented, sample reports stay labelled and unpaid
 npm run requirements:test # 24 checks: supplier requirements kept verbatim, sourced, never invented
 ```
 

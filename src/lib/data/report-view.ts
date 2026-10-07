@@ -107,6 +107,49 @@ export function formatMoment(value: string, locale: AppLocale) {
   return new Intl.DateTimeFormat(locale === "vi" ? "vi-VN" : "en-GB", { dateStyle: "short", timeStyle: "short" }).format(date);
 }
 
+/**
+ * The credit ledger is the one place where money is real. It is read as stored
+ * rows and mapped here — never rendered from a hand-written list, because a
+ * fabricated debit line reads exactly like a genuine charge.
+ */
+export type LedgerRow = {
+  id: string;
+  type: string;
+  amount: number;
+  description: string;
+  created_at: string;
+};
+
+export type LedgerView = {
+  id: string;
+  label: string;
+  detail: string;
+  amountLabel: string;
+  direction: "in" | "out";
+  dateLabel: string;
+};
+
+const LEDGER_LABELS: Record<string, { vi: string; en: string }> = {
+  credit: { vi: "Cấp credits", en: "Credits granted" },
+  debit: { vi: "Company Report", en: "Company Report" },
+  refund: { vi: "Hoàn credits", en: "Credits refunded" },
+  adjustment: { vi: "Điều chỉnh", en: "Adjustment" },
+};
+
+export function toLedgerView(rows: LedgerRow[] | null | undefined, locale: AppLocale): LedgerView[] {
+  return (rows ?? []).map((row) => {
+    const direction: "in" | "out" = row.type === "credit" || row.type === "refund" ? "in" : "out";
+    return {
+      id: row.id,
+      label: LEDGER_LABELS[row.type]?.[locale] ?? row.type,
+      detail: row.description,
+      amountLabel: `${direction === "in" ? "+" : "-"}${row.amount}`,
+      direction,
+      dateLabel: formatDate(row.created_at, locale),
+    };
+  });
+}
+
 export function formatDate(value: string, locale: AppLocale) {
   const date = dayStamp(value);
   if (!date) return "-";

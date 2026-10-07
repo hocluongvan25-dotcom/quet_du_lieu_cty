@@ -47,6 +47,7 @@ import { PeoplePanel, RequirementsPanel } from "@/components/contact-intel";
 import { CustomsHistory } from "@/components/customs-blocks";
 import { buildReportSections } from "@/lib/report-sections";
 import { DEMO_CREDITS, REPORT_COST, type WorkspaceSnapshot } from "@/lib/data/workspace-types";
+import { RESEARCH_PROVIDER, researchCreditCost } from "@/lib/data/research-provider";
 import { getCopy, normalizeLocale, type AppLocale } from "@/lib/i18n";
 
 type SearchMode = "name" | "link";
@@ -175,6 +176,10 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
   const baseReports = isLive ? workspace.reports : initialReports;
   const baseCredits = account?.credits ?? DEMO_CREDITS;
   const credits = isLive ? baseCredits : Math.max(0, baseCredits - demoCreditsUsed);
+  // What a research actually costs today. Sample reports are free, so the
+  // price printed on the button must follow the provider, not a constant.
+  const reportCost = researchCreditCost(RESEARCH_PROVIDER, REPORT_COST);
+  const sampleOnly = RESEARCH_PROVIDER === "demo";
   const reports = useMemo(() => {
     const known = new Set(baseReports.map((report) => report.id));
     return [...createdReports.filter((report) => !known.has(report.id)), ...baseReports];
@@ -191,6 +196,7 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
   const [formError, setFormError] = useState("");
 
   const readyCount = useMemo(() => reports.filter((report) => report.status === "ready").length, [reports]);
+  const expiringSoon = useMemo(() => reports.filter((report) => report.daysLeft <= 7).length, [reports]);
 
   const notify = (message: string) => {
     setToast(message);
@@ -215,8 +221,8 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
       return;
     }
 
-    if (credits < REPORT_COST) {
-      setFormError(t.dashboard.insufficientCredits);
+    if (credits < reportCost) {
+      setFormError(t.dashboard.insufficientCredits.replace("{cost}", String(reportCost)));
       return;
     }
 
@@ -266,7 +272,7 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
         // stored rows instead of the optimistic client state.
         router.refresh();
       } else {
-        setDemoCreditsUsed((current) => current + (result.creditsCharged ?? REPORT_COST));
+        setDemoCreditsUsed((current) => current + (result.creditsCharged ?? reportCost));
       }
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Đã có lỗi xảy ra. Hãy thử lại.");
@@ -370,7 +376,7 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
                     </div>
                     <div className="rounded-lg bg-[#F0EEFF] p-2 text-[#6558E8]"><Sparkles size={16} /></div>
                   </div>
-                  <div className="mt-3 rounded-xl bg-[#F8F9FB] px-3 py-2 text-[11px] leading-4 text-[#777D8D]">{locale === "vi" ? `1 Company Report tiêu chuẩn sử dụng ${REPORT_COST} credits.` : `One standard Company Report uses ${REPORT_COST} credits.`}</div>
+                  <div className="mt-3 rounded-xl bg-[#F8F9FB] px-3 py-2 text-[11px] leading-4 text-[#777D8D]">{reportCost > 0 ? t.dashboard.costNote.replace("{cost}", String(reportCost)) : t.dashboard.costNoteFree}</div>
                   <button type="button" onClick={() => { setShowWallet(false); notify(locale === "vi" ? "Trang nạp credits sẽ sớm có mặt." : "Credit top-up will be available soon."); }} className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#5E54E8] px-3 py-2.5 text-[12px] font-bold text-white hover:bg-[#5147D9]">
                     <Plus size={14} /> {locale === "vi" ? "Nạp credits" : "Add credits"}
                   </button>
@@ -387,10 +393,13 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
             <div>
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-[#ECEAFF] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-[#6257E7]">{t.dashboard.eyebrow}</span>
-                <span className="text-[11px] font-medium text-[#8B90A0]">{t.dashboard.dataClear}</span>
+                {sampleOnly ? null : <span className="text-[11px] font-medium text-[#8B90A0]">{t.dashboard.dataClear}</span>}
                 <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${isLive ? "bg-[#EAF8F3] text-[#168466]" : "bg-[#F1F2F5] text-[#6C7280]"}`}>
                   {isLive ? t.dashboard.liveData : t.dashboard.demoFallback}
                 </span>
+                {sampleOnly ? (
+                  <span className="rounded-full bg-[#FFF4E5] px-2.5 py-1 text-[10px] font-bold text-[#C47A16]">{t.dashboard.sampleOnly}</span>
+                ) : null}
               </div>
               <h1 className="text-[25px] font-bold tracking-[-0.045em] text-[#252837] sm:text-[30px]">{t.dashboard.greeting.replace("{name}", displayName)}</h1>
               <p className="mt-1.5 text-[13px] text-[#747A8A]">{t.dashboard.subtitle}</p>
@@ -445,7 +454,11 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
                 </div>
                 <button disabled={isResearching} type="submit" className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-[#5D53E8] px-5 text-[13px] font-bold text-white shadow-[0_8px_17px_rgba(85,73,218,0.25)] transition hover:bg-[#4E44D7] disabled:cursor-not-allowed disabled:opacity-70">
                   {isResearching ? <LoaderCircle size={17} className="animate-spin" /> : <Sparkles size={16} />}
-                  {isResearching ? t.dashboard.researching : t.dashboard.research}
+                  {isResearching
+                    ? t.dashboard.researching
+                    : reportCost > 0
+                      ? t.dashboard.research.replace("{cost}", String(reportCost))
+                      : t.dashboard.researchFree}
                 </button>
               </form>
               {formError ? <p className="mt-3 flex items-center gap-1.5 text-[11px] font-medium text-[#C45B4D]"><AlertCircle size={13} /> {formError}</p> : <p className="mt-3 flex items-center gap-1.5 text-[11px] text-[#8A90A0]"><ShieldCheck size={13} className="text-[#46A98A]" /> {t.dashboard.publicOnly}</p>}
@@ -519,8 +532,8 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
                 </div>
                 <p className="mt-3 text-[11px] leading-5 text-[#7A8090]">{t.dashboard.retentionText}</p>
                 <div className="mt-4 border-t border-[#EEF0F4] pt-3.5">
-                  <div className="flex items-center justify-between text-[11px]"><span className="text-[#767C8B]">Report sắp hết hạn</span><span className="font-bold text-[#343847]">02</span></div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#EFF0F5]"><div className="h-full w-[27%] rounded-full bg-[#F2AB46]" /></div>
+                  <div className="flex items-center justify-between text-[11px]"><span className="text-[#767C8B]">{locale === "vi" ? "Report sắp hết hạn" : "Reports expiring soon"}</span><span className="font-bold text-[#343847]">{String(expiringSoon).padStart(2, "0")}</span></div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#EFF0F5]"><div className="h-full rounded-full bg-[#F2AB46]" style={{ width: `${reports.length > 0 ? Math.round((expiringSoon / reports.length) * 100) : 0}%` }} /></div>
                 </div>
                 <Link href={`${prefix}/archive`} className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-xl border border-[#DDD9FF] bg-[#FAF9FF] px-3 py-2.5 text-[11px] font-bold text-[#5D53E8] hover:bg-[#F4F2FF]">
                   <Archive size={14} /> {t.dashboard.archive12}
@@ -531,7 +544,7 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
                 <div className="flex items-center justify-between"><div className="rounded-xl bg-white/10 p-2.5"><Database size={18} /></div><span className="rounded-full bg-[#9B8CFF]/20 px-2 py-1 text-[10px] font-bold text-[#CDC6FF]">STARTER</span></div>
                 <p className="mt-4 text-[11px] font-medium text-[#C8C5DC]">{t.dashboard.credits}</p>
                 <p className="mt-1 text-[28px] font-bold tracking-[-0.05em]">{credits}<span className="ml-1 text-sm font-semibold text-[#B7B2D4]">{t.common.credits}</span></p>
-                <div className="mt-4 flex items-center justify-between border-t border-white/10 pt-3 text-[10px] text-[#C7C3D9]"><span>{t.dashboard.enoughFor}</span><span className="font-bold text-white">{Math.floor(credits / 5)} {t.dashboard.reports}</span></div>
+                <div className="mt-4 flex items-center justify-between border-t border-white/10 pt-3 text-[10px] text-[#C7C3D9]"><span>{t.dashboard.enoughFor}</span><span className="font-bold text-white">{reportCost > 0 ? `${Math.floor(credits / reportCost)} ${t.dashboard.reports}` : t.dashboard.noCreditSpend}</span></div>
               </section>
             </div>
           </section>

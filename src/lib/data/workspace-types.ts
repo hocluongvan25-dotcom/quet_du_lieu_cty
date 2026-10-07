@@ -1,4 +1,5 @@
 import type { CompanyReport } from "@/lib/demo-data";
+import type { LedgerView } from "@/lib/data/report-view";
 
 /**
  * Serialisable workspace snapshot shared between server components and client
@@ -32,6 +33,8 @@ export type WorkspaceSnapshot = {
   state: WorkspaceState;
   account: WorkspaceAccount | null;
   reports: CompanyReport[];
+  /** Real rows from credit_ledger, newest first. Empty means no rows were read. */
+  ledger: LedgerView[];
 };
 
 export type WorkspaceMember = {
@@ -69,4 +72,5 @@ export const emptyWorkspace: WorkspaceSnapshot = {
   state: "demo",
   account: null,
   reports: [],
+  ledger: [],
 };
