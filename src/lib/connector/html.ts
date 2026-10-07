@@ -84,6 +84,31 @@ export function htmlToText(html: string): string {
 }
 
 /** Registrable domain gần đúng: đủ dùng để phân biệt "cùng công ty" và "bên thứ ba". */
+/**
+ * Nhãn con của một host thuộc môi trường **thử nghiệm**: `stage.tyson.com`,
+ * `www-dev.tysonfoods.com`.
+ *
+ * Trang của môi trường thử nghiệm vẫn là website của công ty, nhưng nội dung ở
+ * đó chưa chắc là nội dung đang công bố: giá, điều khoản, danh mục có thể là bản
+ * nháp. Lần chạy thật trên tysonfoods.com đã đọc `stage.tyson.com` và
+ * `www-dev.tysonfoods.com` rồi đưa chúng vào danh sách nguồn — report vì thế
+ * trông như đã kiểm nhiều nơi hơn thực tế. Bỏ chúng ra và nói rõ lý do.
+ */
+const NON_PRODUCTION_LABEL = /^(?:www-?)?(?:dev|develop|development|staging|stage|test|testing|qa|uat|sandbox|preview|internal|intranet|localhost|demo|beta)(?:[-.].*)?$/i;
+
+export function isNonProductionHost(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  const registrable = registrableDomain(host);
+  if (!registrable || registrable === host) return false;
+  const subLabels = host.slice(0, host.length - registrable.length).replace(/\.$/, "").split(".").filter(Boolean);
+  return subLabels.some((label) => label !== "www" && NON_PRODUCTION_LABEL.test(label));
+}
+
 export function registrableDomain(host: string): string {
   const clean = host.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
   // IP viết thẳng không có "tên miền rút gọn".

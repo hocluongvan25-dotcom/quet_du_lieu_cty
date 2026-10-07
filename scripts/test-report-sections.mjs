@@ -156,6 +156,29 @@ const demoRowView = toCompanyReportView({
   locale: "vi",
 });
 check("dòng lưu từ provider mẫu hiện nhãn mẫu khi đọc lại", demoRowView.sampleData === true);
+
+// Ca thật: mỗi trường lấy từ cùng một trang sinh một dòng bằng chứng, nên danh
+// sách nguồn của tyson.com in cùng một URL bốn lần, cộng thêm dòng "đã đọc" cho
+// chính URL đó — trông như đã kiểm nhiều nơi hơn thực tế.
+const repeatedEvidence = [
+  { company_report_id: "r1", kind: "website", source_label: "Website chính thức", source_url: "https://tyson.com/", field_name: "official_website", evidence_snippet: "x", is_verified: true },
+  { company_report_id: "r1", kind: "website", source_label: "Trang công ty · tyson.com/contact-us", source_url: "https://tyson.com/contact-us", field_name: "public_business_email", evidence_snippet: "Email: comments@tyson.com", is_verified: true },
+  { company_report_id: "r1", kind: "website", source_label: "Trang công ty · tyson.com/contact-us", source_url: "https://tyson.com/contact-us", field_name: "public_business_phone", evidence_snippet: "Phone: 18002336332", is_verified: true },
+  { company_report_id: "r1", kind: "website", source_label: "Đã đọc · tyson.com/contact-us", source_url: "https://tyson.com/contact-us", field_name: null, evidence_snippet: null, is_verified: false },
+  { company_report_id: "r1", kind: "website", source_label: "Đã đọc · tyson.com/contact-us", source_url: "https://tyson.com/contact-us", field_name: null, evidence_snippet: null, is_verified: false },
+];
+const dedupedView = toCompanyReportView({
+  report: { ...baseRow, report_data: { provider: "connector", signals: [] } },
+  evidence: repeatedEvidence,
+  locale: "vi",
+});
+check("mỗi nguồn chỉ hiện một dòng", dedupedView.sources.length === 2, JSON.stringify(dedupedView.sources.map((source) => source.url)));
+check(
+  "và giữ dòng nói được nhiều hơn (có gắn trường) thay vì dòng 'đã đọc'",
+  dedupedView.sources.find((source) => source.url === "https://tyson.com/contact-us")?.label.includes("Trang công ty") === true,
+  JSON.stringify(dedupedView.sources),
+);
+
 check("độ tin cậy vẫn giữ nguyên con số, nhãn chỉ nói thêm nguồn gốc", demoRowView.confidence === 84);
 
 const unmarkedRowView = toCompanyReportView({
@@ -232,6 +255,24 @@ const noEvidence = pickOfficialDomain(
 );
 check("không có bằng chứng tên ⇒ KHÔNG chọn tên miền nào", noEvidence === null, JSON.stringify(noEvidence));
 check("tên quá ngắn cũng không dò bừa", pickOfficialDomain([{ url: "https://ac.com/", title: "", snippet: "" }], "AC") === null);
+// Ca thật người dùng báo: "Tyson Foods, Inc." có hai website cùng công ty —
+// tyson.com (trang người tiêu dùng) và tysonfoods.com (trang doanh nghiệp).
+// Kết quả cũ phụ thuộc thứ tự search trả về, và trang B2C thắng.
+const tysonHits = [
+  { url: "https://www.tyson.com/", title: "Tyson Brand Chicken | Recipes & Products", snippet: "Find chicken recipes and coupons." },
+  { url: "https://www.tysonfoods.com/", title: "Tyson Foods, Inc. | Corporate", snippet: "One of the world's largest food companies." },
+  { url: "https://www.linkedin.com/company/tyson-foods", title: "Tyson Foods | LinkedIn", snippet: "Tyson Foods, Inc." },
+];
+const pickedTyson = pickOfficialDomain(tysonHits, "Tyson Foods, Inc.");
+check("tên có 'Foods' ⇒ chọn tysonfoods.com, không phải trang B2C tyson.com", pickedTyson?.domain === "tysonfoods.com", JSON.stringify(pickedTyson));
+check("và nói rõ vì sao: 2/2 từ của tên nằm trong tên miền", (pickedTyson?.why[0] ?? "").includes("2/2"), JSON.stringify(pickedTyson?.why));
+check("ô tìm kiếm bỏ hậu tố pháp lý", websiteQueryFor("Tyson Foods, Inc.", "United States") === '"Tyson Foods" United States official website', websiteQueryFor("Tyson Foods, Inc.", "United States"));
+
+// Đảo thứ tự: trang B2C đứng trước vẫn không thắng — điểm khớp tên quyết định.
+const reordered = pickOfficialDomain([...tysonHits].reverse(), "Tyson Foods, Inc.");
+check("đảo thứ tự kết quả cũng không đổi kết luận", reordered?.domain === "tysonfoods.com", JSON.stringify(reordered));
+check("tên chỉ một từ vẫn chọn đúng tên miền của chính nó", pickOfficialDomain(tysonHits, "Tyson")?.domain === "tyson.com", JSON.stringify(pickOfficialDomain(tysonHits, "Tyson")));
+
 check("ô tìm kiếm giữ tên trong ngoặc kép", websiteQueryFor('Vinamilk "fake"', "Vietnam").startsWith('"Vinamilk fake" Vietnam'), websiteQueryFor("Vinamilk", "Vietnam"));
 
 section("kết quả connector → report: mọi trường đều đếm được");

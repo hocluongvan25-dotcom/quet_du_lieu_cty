@@ -88,7 +88,7 @@ const TERMS_CUE = /minimum order quantity|\bMOQ\b|payment terms|letter of credit
  * không hướng tới nhà cung cấp — nếu có "suppliers must…" thì vẫn là yêu cầu.
  */
 const SELF_STATEMENT =
-  /\bwe (?:are|were|have|hold|own|operate)\b|\bour (?:own )?(?:facility|facilities|plant|plants|site|sites|company|factory|factories|operation|operations|brand|store|stores)\b/i;
+  /\bwe (?:are|were|have|hold|own|operate|follow|comply with|adhere to|meet|maintain|use|believe|strive)\b|\bour (?:own )?(?:facility|facilities|plant|plants|site|sites|company|factory|factories|operation|operations|brand|store|stores|products?|packaging|labels?|labell?ing|allergens?|ingredients?|customers?)\b/i;
 const SUPPLIER_DIRECTED = /suppliers?\b|vendors?\b|nhà cung cấp|you (?:must|shall|need|are required)|all (?:suppliers|vendors)/i;
 
 /** Tiêu đề mở đầu một danh sách yêu cầu — dùng cho các gạch đầu dòng bên dưới. */
@@ -132,6 +132,7 @@ export type FindRequirementsInput = {
 export function findRequirements({ url, lines, kind = "html" }: FindRequirementsInput): Requirement[] {
   const found: Requirement[] = [];
   const seen = new Set<string>();
+  const seenDetails = new Set<string>();
 
   lines.forEach((line, index) => {
     const text = line.replace(/\s+/g, " ").trim();
@@ -149,6 +150,13 @@ export function findRequirements({ url, lines, kind = "html" }: FindRequirements
     if (terms.length === 0) return;
 
     const detail = clip(text);
+    // Cùng một câu gặp lại ở trang khác (hoặc ở dòng khác của cùng trang) chỉ
+    // tính một lần. Còn **trong** một câu thì mỗi khái niệm vẫn là một thẻ riêng:
+    // câu liệt kê "BRCGS, HACCP, bảo hiểm, COO, MOQ" là mấy thứ nhà cung cấp
+    // phải chuẩn bị, gộp thành một thẻ là bớt việc cho người đọc mất.
+    if (seenDetails.has(detail)) return;
+    seenDetails.add(detail);
+
     terms.forEach((term) => {
       const label = term.label.vi;
       const key = `${label}|${detail}`;

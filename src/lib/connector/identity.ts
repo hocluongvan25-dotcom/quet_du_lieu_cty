@@ -47,3 +47,70 @@ export function mentionsName(pageText: string, name: string): boolean {
   const firstToken = foldName(name.trim().split(/\s+/)[0] ?? "");
   return firstToken.length >= 6 && folded.includes(firstToken);
 }
+
+// --------------------------------------------------- hai tên miền một công ty ---
+
+/**
+ * Hai tên miền có phải **cùng một thương hiệu** không?
+ *
+ * Ca thật: công ty dùng `tysonfoods.com` cho trang doanh nghiệp và `tyson.com`
+ * cho trang người tiêu dùng; hộp thư `InternationalInquiry@tyson.com` là của
+ * chính công ty đó. So bằng nhau cứng thì hộp thư ấy bị đẩy vào "đã loại trừ",
+ * tức là mất đúng cái kênh mà người dùng cần nhất — một lỗi tệ hơn cả việc để
+ * lọt một hộp thư ngoài.
+ *
+ * Hàm này chỉ trả lời câu **hẹp**: hai nhãn tên miền có quan hệ thương hiệu
+ * không (một nhãn là tiền tố của nhãn kia, hoặc chứa nhau, và phần chung đủ dài).
+ * Nó **không** kết luận "cùng công ty" — kết luận đó phải do một lần đọc trang
+ * thật trả lời (xem `siblingDomains` trong index.ts). Quan hệ tên chỉ dùng để
+ * quyết định **có đáng bỏ một request ra kiểm không**.
+ *
+ * `apple.com` và `applebees.com` cũng lọt qua phép thử này — nên nó một mình
+ * không bao giờ đủ để nhận một hộp thư.
+ */
+export function relatedBrand(a: string, b: string): boolean {
+  const left = (a.split(".")[0] ?? "").toLowerCase();
+  const right = (b.split(".")[0] ?? "").toLowerCase();
+  if (!left || !right || left === right) return false;
+  const [short, long] = left.length <= right.length ? [left, right] : [right, left];
+  if (short.length < 4) return false;
+  return long.startsWith(short) || long.includes(short);
+}
+
+/**
+ * Từ của tên công ty, đã bỏ hậu tố pháp lý và từ nối.
+ *
+ * "Tyson Foods, Inc." → [tyson, foods]. Bỏ "Inc" quan trọng vì hậu tố đó có mặt
+ * trong gần như mọi tên miền doanh nghiệp nên nó không phân biệt được gì; còn
+ * "foods" mới là chữ phân biệt `tysonfoods.com` với `tyson.com`.
+ */
+const LEGAL_SUFFIXES = new Set([
+  "inc", "incorporated", "corp", "corporation", "co", "company", "companies", "ltd", "limited",
+  "llc", "llp", "lp", "plc", "gmbh", "ag", "sa", "srl", "pvt", "pte", "bv", "nv", "ab", "oy",
+  "aps", "spa", "sas", "sl", "kft", "doo", "zrt", "jsc", "pt", "tbk", "bhd", "sdn", "as",
+]);
+
+const NAME_STOPWORDS = new Set(["of", "the", "and", "for", "a", "an", "de", "del", "la", "da", "do", "e", "y", "und", "et"]);
+
+export function nameTokens(name: string): string[] {
+  const raw = name
+    .split(/[\s,./()&]+/)
+    .map((part) => foldName(part))
+    .filter(Boolean);
+  // Chỉ bỏ hậu tố pháp lý ở **cuối** tên: "Corp" ở giữa có thể là tên thật.
+  let end = raw.length;
+  while (end > 1 && LEGAL_SUFFIXES.has(raw[end - 1])) end -= 1;
+  return raw.slice(0, end).filter((token) => token.length >= 2 && !NAME_STOPWORDS.has(token));
+}
+
+/**
+ * Tên đã bỏ hậu tố pháp lý, **giữ nguyên cách viết gốc** — dùng cho câu truy vấn
+ * tìm kiếm: `"Tyson Foods, Inc."` → `Tyson Foods`. Máy tìm kiếm trả kết quả tốt
+ * hơn khi không có "Inc.", và trên giao diện thì người dùng vẫn thấy tên đầy đủ.
+ */
+export function stripLegalSuffix(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  let end = parts.length;
+  while (end > 1 && LEGAL_SUFFIXES.has(foldName(parts[end - 1].replace(/[.,]/g, "")))) end -= 1;
+  return parts.slice(0, end).join(" ").replace(/[,\s]+$/, "");
+}

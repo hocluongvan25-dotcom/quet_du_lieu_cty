@@ -19,6 +19,19 @@ export type FoundChannel = {
   sourceUrl: string;
   evidenceSnippet: string;
   /**
+   * Giá trị nằm trên một **tên miền khác** của cùng công ty (ví dụ hộp thư
+   * `…@tyson.com` tìm thấy khi đang đọc `tysonfoods.com`). Chỉ có sau khi một
+   * lần đọc trang thật xác nhận hai tên miền thuộc cùng công ty — nếu chưa xác
+   * nhận được thì giá trị không thành kênh và lý do được ghi lại cho người kiểm.
+   */
+  siblingDomain?: { domain: string; verifiedBy: string };
+  /**
+   * Số điện thoại nằm cùng khối với một hộp thư **chưa biết thuộc ai**. Chưa
+   * quyết định được cho tới khi tên miền đó được xác minh: cùng công ty thì nhận,
+   * khác công ty thì loại kèm lý do. Xem `foreignEmails` trong PageExtraction.
+   */
+  deferredForeign?: { domain: string; published?: string };
+  /**
    * Số điện thoại đã chuẩn hoá về E.164 — chỉ có khi biết quốc gia của công ty.
    * `value` vẫn giữ nguyên như đã công bố; đây là trường thứ hai, không thay thế.
    */
@@ -58,6 +71,12 @@ export type PageReport = {
   channels: number;
   /** Trang HTML hay file PDF công khai (báo cáo, press release, catalogue…). */
   kind?: "html" | "pdf";
+  /**
+   * Trang được đọc **chỉ để xác minh quan hệ tên miền**, không phải nguồn của
+   * một giá trị nào. Vẫn ghi lại (đã đọc thì nói đã đọc) nhưng không tính vào
+   * danh sách nguồn của report.
+   */
+  relationCheck?: boolean;
 };
 
 /**
@@ -128,9 +147,23 @@ export type ConnectorResult = {
    * về là phần đã đọc được — người dùng phải được biết nó chưa đầy đủ.
    */
   stoppedEarly?: string;
+  /**
+   * Tên miền khác của cùng công ty đã xác minh trong lần chạy này. Có mặt ở đây
+   * để người kiểm đọc được **vì sao** một hộp thư ngoài tên miền chính lại được
+   * nhận, thay vì phải tin vào kết quả.
+   */
+  siblingDomains?: { domain: string; verifiedBy: string }[];
 };
 
 export type TargetFamily = "email" | "phone" | "whatsapp" | "linkedin" | "form";
+
+/** Hộp thư trên tên miền khác, chờ xác minh quan hệ giữa hai tên miền. */
+export type ForeignEmail = {
+  value: string;
+  domain: string;
+  sourceUrl: string;
+  evidenceSnippet: string;
+};
 
 export type PageExtraction = {
   channels: FoundChannel[];
@@ -139,4 +172,6 @@ export type PageExtraction = {
   notes: ConnectorNote[];
   /** Câu mô tả của chính website (meta description / og:description), nguyên văn. */
   description?: string;
+  /** Hộp thư trên tên miền khác — chỉ thành kênh nếu xác minh được quan hệ. */
+  foreignEmails?: ForeignEmail[];
 };

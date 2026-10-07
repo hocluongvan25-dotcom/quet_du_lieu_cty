@@ -39,6 +39,10 @@ const DEPARTMENT_LOCALS = new Set([
   "procurement", "purchasing", "sourcing", "suppliers", "vendor", "vendors", "ingredients", "export",
   "exports", "import", "imports", "wholesale", "b2b", "accounts", "accounting", "billing", "finance",
   "logistics", "quality", "qa", "qc",
+  // Hộp thư trao đổi thương mại quốc tế: "InternationalInquiry@tyson.com" là
+  // kênh của bộ phận, không phải hộp thư chung — và đây đúng là loại cửa mà
+  // người tìm nhà cung cấp cần.
+  "international", "internationalinquiry", "internationalinquiries", "globalinquiry", "globalinquiries", "trade",
 ]);
 
 /** Giá trị trông giống email nhưng là tên file hoặc email hệ thống. */
@@ -93,6 +97,24 @@ export function classifyEmailLocal(local: string): IdentityMatch {
   if (GENERAL_LOCALS.has(key) || GENERAL_LOCALS.has(lower)) return "company_general";
   if (DEPARTMENT_LOCALS.has(key) || DEPARTMENT_LOCALS.has(lower)) return "department";
   return "company_general";
+}
+
+/**
+ * Giá trị trong `mailto:` có thể bị mã hoá URL: `mailto:%20comments@tyson.com`
+ * là hộp thư thật `comments@tyson.com` (dấu cách thừa ở đầu). Không giải mã thì
+ * report hiện ra một địa chỉ trông như rác — và tệ hơn, nó thành **hai** dòng
+ * cho cùng một hộp thư.
+ */
+function decodeMailtoValue(raw: string): string {
+  let value = raw.trim();
+  if (value.includes("%")) {
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      // Mã hoá hỏng thì giữ nguyên: thà hiện đúng như đã công bố còn hơn đoán.
+    }
+  }
+  return value.replace(/^[\s\u00a0]+|[\s\u00a0]+$/g, "");
 }
 
 function isAssetEmail(value: string): boolean {
@@ -187,7 +209,7 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
   // mailto: trong href, kể cả khi chữ trên trang bị cắt. PDF không có href.
   const mailtoMatches = kind === "html" ? html.match(/mailto:([^"'>?\s]+)/gi) ?? [] : [];
   mailtoMatches.forEach((raw) => {
-    const value = decodeEntities(raw.replace(/^mailto:/i, "").trim());
+    const value = decodeMailtoValue(decodeEntities(raw.replace(/^mailto:/i, "")));
     if (!value) return;
     const lineIndex = lines.findIndex((line) => line.toLowerCase().includes(value.toLowerCase()));
     emailMatches.push({ value, index: lineIndex === -1 ? 0 : lineIndex, line: lines[lineIndex === -1 ? 0 : lineIndex] ?? value });
@@ -200,7 +222,7 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
     if (!uniqueEmails.has(key)) uniqueEmails.set(key, match);
   });
 
-  const foreignEmails: { value: string; domain: string; line: number }[] = [];
+  const foreignEmails: { value: string; domain: string; line: number; evidenceSnippet: string }[] = [];
   const ownEmailLines: number[] = [];
 
   uniqueEmails.forEach((match) => {
@@ -209,8 +231,16 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
     const emailDomain = registrableDomain(domain);
 
     if (emailDomain !== siteDomain) {
-      // Không thuộc website này: ghi vào "đã loại trừ" kèm lý do, không đưa vào kênh.
-      foreignEmails.push({ value: match.value, domain: emailDomain, line: match.index });
+      // Không thuộc website này — nhưng "khác tên miền" **không** đồng nghĩa "bên
+      // thứ ba": Tyson dùng cả tyson.com lẫn tysonfoods.com. Không tự loại ở đây;
+      // ghi lại kèm câu chữ, để bước xác minh ở index.ts quyết định bằng cách
+      // đọc chính tên miền kia. Xem `relatedBrand`.
+      foreignEmails.push({
+        value: match.value,
+        domain: emailDomain,
+        line: match.index,
+        evidenceSnippet: clip(lines[match.index] ?? match.value),
+      });
       return;
     }
 
@@ -299,15 +329,7 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
     // trường hợp này xảy ra khi trang liệt kê cả liên hệ của đơn vị vận hành web store.
     const nearbyForeign = foreignEmails.find((email) => Math.abs(email.line - match.line) <= 2);
     const nearbyOwn = ownEmailLines.some((line) => Math.abs(line - match.line) <= 2);
-    if (nearbyForeign && !nearbyOwn) {
-      notes.push({
-        kind: "excluded",
-        label: `${match.raw} · ${nearbyForeign.value}`,
-        detail: `Số này nằm cùng khối với email của bên thứ ba (${nearbyForeign.domain}) nên không được ghi thành liên hệ của công ty.`,
-        sourceUrl: url,
-      });
-      return;
-    }
+    const pendingForeign = nearbyForeign && !nearbyOwn ? nearbyForeign : null;
 
     const isFax = /fax/i.test(lines[match.line] ?? "");
     // Số quốc tế thì chuẩn hoá được ngay; số nội địa chỉ chuẩn hoá được khi biết
@@ -326,6 +348,9 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
       policy: isFax ? "manual_contact_only" : "outreach_ready",
       sourceUrl: url,
       evidenceSnippet: clip(lines[match.line] ?? match.raw),
+      // Chờ xác minh tên miền kia: cùng công ty thì số này là số của công ty,
+      // khác công ty thì bị loại kèm lý do. Không quyết định ở tầng trang.
+      ...(pendingForeign ? { deferredForeign: { domain: pendingForeign.domain, published: match.raw } } : {}),
     });
   });
 
@@ -400,16 +425,6 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
     });
   }
 
-  // ------------------------------------------------- ghi chú loại trừ --------
-  foreignEmails.forEach((email) => {
-    notes.push({
-      kind: "excluded",
-      label: email.value,
-      detail: `Email thuộc tên miền ${email.domain}, khác website của công ty — có thể của đơn vị vận hành web store hoặc bên thứ ba, nên không ghi thành liên hệ của công ty.`,
-      sourceUrl: url,
-    });
-  });
-
   // ------------------------------------------------- ghi chú chưa thấy ------
   if (kind === "html" && targets.includes("whatsapp") && !channels.some((channel) => channel.type === "whatsapp")) {
     const widget = CHAT_WIDGETS.find((item) => item.pattern.test(html));
@@ -432,7 +447,7 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
     });
   }
 
-  return { channels, people, requirements, notes };
+  return { channels, people, requirements, notes, ...(foreignEmails.length > 0 ? { foreignEmails: foreignEmails.map(({ value, domain, evidenceSnippet: snippet }) => ({ value, domain, sourceUrl: url, evidenceSnippet: snippet })) } : {}) };
 }
 
 /**

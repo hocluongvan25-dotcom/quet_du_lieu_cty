@@ -284,14 +284,29 @@ export function toCompanyReportView(options: {
       };
     });
 
-  const sources: Source[] = evidence
-    .filter((row) => SOURCE_KINDS.includes(row.kind as Source["kind"]))
-    .map((row) => ({
+  // Một dòng cho mỗi nguồn. Bảng `source_evidence` có một dòng cho **mỗi trường**
+  // lấy từ cùng một trang, nên nếu không gộp thì danh sách nguồn lặp cùng một URL
+  // ba bốn lần — trông như đã kiểm nhiều nơi hơn thực tế.
+  const sourceByUrl = new Map<string, Source>();
+  for (const row of evidence) {
+    if (!SOURCE_KINDS.includes(row.kind as Source["kind"])) continue;
+    const url = row.source_url;
+    if (!url) continue;
+    const existing = sourceByUrl.get(url);
+    if (existing) {
+      // Dòng có gắn trường (bằng chứng cho một giá trị) nói được nhiều hơn dòng
+      // chỉ ghi "đã đọc", nên nó thắng khi cả hai cùng trỏ một URL.
+      if (row.field_name && !existing.verified) existing.verified = row.is_verified;
+      continue;
+    }
+    sourceByUrl.set(url, {
       label: row.source_label,
-      url: row.source_url,
+      url,
       kind: row.kind as Source["kind"],
       verified: row.is_verified,
-    }));
+    });
+  }
+  const sources: Source[] = [...sourceByUrl.values()];
 
   const signals = readSignals(report.report_data);
 

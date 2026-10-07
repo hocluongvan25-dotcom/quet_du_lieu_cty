@@ -144,5 +144,39 @@ const adviceWords = ["nên ", "khuyến nghị", "hạng A", "ưu tiên", "gợi
 check("không mục nào chứa lời khuyên", page.requirements.every((item) => !adviceWords.some((word) => `${item.label} ${item.detail}`.toLowerCase().includes(word))));
 
 await rm(workDir, { recursive: true, force: true });
+
+section("câu của chính nhà nhập khẩu không phải yêu cầu nhà cung cấp");
+
+// Ca thật: trang liên hệ của tyson.com nói về nhãn mác sản phẩm **của họ**. Câu
+// này bị biến thành 3 thẻ "Điều kiện & giấy tờ nhà cung cấp phải đáp ứng" — nhà
+// cung cấp đọc xong tưởng đó là yêu cầu dành cho mình.
+const consumerStatement =
+  "We follow truth in labeling policies on all our products. The top eight allergens required by the FDA (dairy, tree nuts, peanuts, eggs, soy, wheat, fish and shellfish) will always be listed in the “contains” section of the packaging.";
+const consumerFound = api.findRequirements({ url: "https://www.tyson.com/contact-us", lines: [consumerStatement] });
+check("câu về sản phẩm của chính họ KHÔNG thành yêu cầu nhà cung cấp", consumerFound.length === 0, JSON.stringify(consumerFound.map((item) => item.label)));
+
+const supplierStatement =
+  "Suppliers must provide a current FDA facility registration and comply with our Supplier Code of Conduct before shipping.";
+const supplierFound = api.findRequirements({ url: "https://www.tysonfoods.com/supplier-documents", lines: [supplierStatement] });
+check("câu hướng tới nhà cung cấp vẫn được nhận", supplierFound.length === 1 && supplierFound[0].label.includes("FDA"), JSON.stringify(supplierFound.map((item) => item.label)));
+
+const multiTerm = api.findRequirements({
+  url: "https://buyer.example/suppliers",
+  lines: ["All suppliers must hold a valid FDA facility registration, meet our labelling requirements and disclose allergens before shipment."],
+});
+check(
+  "câu liệt kê nhiều loại giấy tờ vẫn ra đủ từng thẻ (không gộp mất việc phải làm)",
+  multiTerm.length >= 2 && new Set(multiTerm.map((item) => item.label)).size === multiTerm.length,
+  `${multiTerm.length} thẻ: ${multiTerm.map((item) => item.label).join(", ")}`,
+);
+check(
+  "và mọi thẻ đều giữ nguyên câu gốc làm bằng chứng",
+  multiTerm.every((item) => item.detail.includes("FDA facility registration")),
+);
+check(
+  "cùng một câu ở hai trang chỉ tính một lần",
+  api.findRequirements({ url: "https://buyer.example/suppliers", lines: [`${supplierStatement}`, supplierStatement] }).length === supplierFound.length,
+);
+
 console.log(`\n${passed} check pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);

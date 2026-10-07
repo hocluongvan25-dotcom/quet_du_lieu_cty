@@ -32,12 +32,12 @@
  *    ở đây chỉ đối chiếu pháp nhân và ghi lại tên người đương nhiệm kèm nguồn.
  */
 
-import { extractFromLines, extractFromPage } from "./extract";
-import { mentionsName } from "./identity";
+import { classifyEmailLocal, extractFromLines, extractFromPage } from "./extract";
+import { mentionsName, nameTokens, relatedBrand, foldName } from "./identity";
 import { fetchPage } from "./fetch";
 import { pdfToLines } from "./pdf";
 import { planDiscovery, normalizeSeed, hostOf, type DiscoveryOptions } from "./discover";
-import { registrableDomain } from "./html";
+import { isNonProductionHost, registrableDomain } from "./html";
 import { isPathAllowed } from "./robots";
 import { coverageOf, nearMissBuyingDoors, secondaryReason } from "./gate";
 import {
@@ -53,6 +53,7 @@ import type {
   ConnectorResult,
   FoundChannel,
   FoundPerson,
+  ForeignEmail,
   PageExtraction,
   PageReport,
   SecondaryReport,
@@ -138,6 +139,66 @@ export function collapseFormChannels(channels: FoundChannel[]): { channels: Foun
   return { channels: kept, collapsed: forms.length - 1 };
 }
 
+export type SiblingVerdict = {
+  verified: boolean;
+  status: number | "blocked" | "error";
+  why: string;
+};
+
+/**
+ * Đọc **một trang** của tên miền kia để trả lời: có căn cứ nào nói tên miền đó
+ * thuộc cùng công ty không?
+ *
+ * Đây là chỗ sửa lỗi "so bằng nhau cứng": `tysonfoods.com` và `tyson.com` là hai
+ * website của cùng một công ty, nên hộp thư `…@tyson.com` tìm thấy trên trang
+ * doanh nghiệp là hộp thư của chính công ty đó, không phải của bên thứ ba. Nhưng
+ * cũng không thể cứ thấy tên na ná nhau là nhận — `apple.com` và `applebees.com`
+ * cũng na ná. Vì vậy câu trả lời đến từ **đọc trang**: chuyển hướng về tên miền
+ * chính, hoặc nhắc đúng tên công ty, hoặc dẫn liên kết về tên miền chính.
+ *
+ * Một request, chỉ trang chủ, không đi tiếp vào tên miền đó. Không xác minh được
+ * thì giữ nguyên việc loại trừ — và ghi lại **vì sao** để người kiểm đọc.
+ */
+export async function verifySiblingDomain(
+  foreignDomain: string,
+  input: {
+    siteDomain: string;
+    companyName: string;
+    fetchImpl?: typeof fetch;
+    userAgent?: string;
+    guard?: RunConnectorOptions["guard"];
+  },
+): Promise<SiblingVerdict> {
+  const url = `https://${foreignDomain}/`;
+  const outcome = await fetchPage(url, { fetchImpl: input.fetchImpl, userAgent: input.userAgent, guard: input.guard });
+  if (!outcome.ok) {
+    return { verified: false, status: outcome.blocked ? "blocked" : "error", why: `không đọc được ${foreignDomain} (${outcome.reason ?? "lỗi"})` };
+  }
+
+  const finalDomain = registrableDomain(hostOf(outcome.finalUrl));
+  if (finalDomain === input.siteDomain) {
+    return { verified: true, status: outcome.status, why: `${foreignDomain} chuyển hướng về ${input.siteDomain}` };
+  }
+
+  const tokens = nameTokens(input.companyName);
+  const folded = foldName(outcome.body);
+  const matched = tokens.filter((token) => folded.includes(token));
+  const needed = Math.min(tokens.length, 2);
+  if (needed > 0 && matched.length >= needed) {
+    return { verified: true, status: outcome.status, why: `${foreignDomain} nhắc đúng tên "${input.companyName}"` };
+  }
+
+  if (outcome.body.includes(input.siteDomain)) {
+    return { verified: true, status: outcome.status, why: `${foreignDomain} dẫn liên kết về ${input.siteDomain}` };
+  }
+
+  return {
+    verified: false,
+    status: outcome.status,
+    why: `trang ${foreignDomain} không nhắc tên công ty và không dẫn về ${input.siteDomain}`,
+  };
+}
+
 export async function runConnector(seedInput: string, options: RunConnectorOptions = {}): Promise<ConnectorResult> {
   const seedUrl = normalizeSeed(seedInput);
   const log = options.log ?? (() => {});
@@ -166,6 +227,9 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
   let identityMatched: boolean | undefined = nameToConfirm ? false : undefined;
   let siteDescription: { text: string; sourceUrl: string } | undefined;
   let stoppedEarly: string | undefined;
+  // Hộp thư trên tên miền khác — chờ xác minh ở cuối bước 2, trước khi chấm cổng.
+  const foreignAll: ForeignEmail[] = [];
+  const siblingDomains: { domain: string; verifiedBy: string }[] = [];
 
   const deadlineReached = () => options.deadlineAt !== undefined && Date.now() >= options.deadlineAt;
   const stopBecauseDeadline = (stage: string) => {
@@ -206,6 +270,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
 
     requirements = mergeRequirements(requirements, extracted.requirements);
     notes.push(...extracted.notes);
+    extracted.foreignEmails?.forEach((email) => foreignAll.push(email));
   };
 
   const crawlPage = async (url: string) => {
@@ -275,7 +340,14 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
   };
 
   // ---------------------------------------------------- bước 2: nguồn cấp 1 ---
-  const htmlUrls = [...new Set(plan.urls)];
+  // URL người dùng dán thì luôn đọc (họ chủ động chọn nó); URL **mình tự tìm
+  // được** mà nằm ở môi trường thử nghiệm thì bỏ, kèm lý do — đọc bản nháp rồi
+  // ghi vào nguồn là làm report trông dày hơn thực tế.
+  const keepDiscovered = (url: string) => normalizeSeed(url) === seedUrl || !isNonProductionHost(url);
+  const droppedForStaging = [...new Set([...plan.urls, ...plan.documents])].filter((url) => !keepDiscovered(url));
+  droppedForStaging.forEach((url) => pages.push({ url, status: "skipped", reason: "môi trường thử nghiệm (dev/staging), không dùng làm nguồn", channels: 0 }));
+
+  const htmlUrls = [...new Set(plan.urls)].filter(keepDiscovered);
   log(`đọc ${htmlUrls.length} trang trên ${domain}${plan.sitemapFound ? " (có sitemap)" : ""}`);
 
   for (const url of htmlUrls) {
@@ -284,13 +356,137 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
     if (delayMs > 0) await sleep(delayMs);
   }
 
-  const documentUrls = [...new Set(plan.documents)].filter((url) => !htmlUrls.includes(url));
+  const documentUrls = [...new Set(plan.documents)].filter(keepDiscovered).filter((url) => !htmlUrls.includes(url));
   if (documentUrls.length > 0) log(`đọc ${documentUrls.length} tài liệu PDF trên ${domain}`);
 
   for (const url of documentUrls) {
     if (stopBecauseDeadline("đọc tài liệu PDF")) break;
     await crawlDocument(url);
     if (delayMs > 0) await sleep(delayMs);
+  }
+
+  // ------------------------------- xác minh tên miền khác của cùng công ty ---
+  // Chỉ chạy khi có hộp thư nằm ngoài tên miền chính. Mỗi tên miền: một lần đọc
+  // trang chủ. Quyết định ở đây — trước khi chấm cổng — để hộp thư của chính
+  // công ty kịp tính vào coverage, còn hộp thư của bên thứ ba thì bị loại kèm lý do.
+  if (foreignAll.length > 0) {
+    const byDomain = new Map<string, ForeignEmail[]>();
+    for (const email of foreignAll) {
+      const list = byDomain.get(email.domain) ?? [];
+      list.push(email);
+      byDomain.set(email.domain, list);
+    }
+
+    /** Bỏ những số điện thoại đang chờ tên miền này, kèm lý do cụ thể cho người kiểm. */
+    const dropDeferredPhones = (foreignDomain: string, why: string) => {
+      for (let index = channels.length - 1; index >= 0; index -= 1) {
+        const channel = channels[index];
+        if (channel.deferredForeign?.domain !== foreignDomain) continue;
+        notes.push({
+          kind: "excluded",
+          label: `${channel.deferredForeign.published ?? channel.value} · ${foreignDomain}`,
+          detail: why,
+          sourceUrl: channel.sourceUrl,
+        });
+        channels.splice(index, 1);
+      }
+    };
+
+    for (const [foreignDomain, emails] of byDomain) {
+      if (!relatedBrand(foreignDomain, domain)) {
+        emails.forEach((email) => {
+          notes.push({
+            kind: "excluded",
+            label: email.value,
+            detail: `Email thuộc tên miền ${email.domain}, tên miền này không có quan hệ tên với ${domain} — không đủ căn cứ để ghi thành liên hệ của công ty.`,
+            sourceUrl: email.sourceUrl,
+          });
+        });
+        dropDeferredPhones(
+          foreignDomain,
+          `Số này nằm cùng khối với email trên tên miền ${foreignDomain}, mà tên miền đó không có quan hệ tên với ${domain} — nên không ghi thành liên hệ.`,
+        );
+        continue;
+      }
+
+      if (stopBecauseDeadline(`xác minh tên miền ${foreignDomain}`)) {
+        emails.forEach((email) => {
+          notes.push({
+            kind: "excluded",
+            label: email.value,
+            detail: `Email thuộc tên miền ${email.domain}, chưa xác minh được quan hệ với ${domain} vì hết thời gian cho phép — để người xem lại.`,
+            sourceUrl: email.sourceUrl,
+          });
+        });
+        dropDeferredPhones(foreignDomain, `Số này nằm cùng khối với email trên tên miền ${foreignDomain} — chưa xác minh được vì hết thời gian cho phép, nên để người xem lại.`);
+        continue;
+      }
+
+      const verdict = await verifySiblingDomain(foreignDomain, {
+        siteDomain: domain,
+        companyName: nameToConfirm,
+        fetchImpl: options.fetchImpl,
+        userAgent: options.userAgent,
+        guard: options.guard,
+      });
+      pages.push({ url: `https://${foreignDomain}/`, status: verdict.status, reason: verdict.why, channels: 0, kind: "html", relationCheck: true });
+
+      if (verdict.verified) {
+        siblingDomains.push({ domain: foreignDomain, verifiedBy: verdict.why });
+        emails.forEach((email) => {
+          const key = `email:${email.value.toLowerCase()}`;
+          if (seenChannels.has(key)) return;
+          seenChannels.add(key);
+          const local = email.value.split("@")[0] ?? "";
+          channels.push({
+            type: "email",
+            value: email.value,
+            label: `Email công bố (${foreignDomain} — cùng công ty)`,
+            identityMatch: classifyEmailLocal(local),
+            certainty: "confirmed",
+            policy: "needs_mailbox_check",
+            sourceUrl: email.sourceUrl,
+            evidenceSnippet: email.evidenceSnippet,
+            siblingDomain: { domain: foreignDomain, verifiedBy: verdict.why },
+          });
+        });
+        // Số điện thoại nằm cùng khối với hộp thư đó: giờ đã biết là của công ty.
+        channels.forEach((channel) => {
+          if (channel.deferredForeign?.domain === foreignDomain) delete channel.deferredForeign;
+        });
+        log(`tên miền cùng công ty: ${foreignDomain} — ${verdict.why}; nhận ${emails.length} hộp thư của chính công ty`);
+        continue;
+      }
+
+      // Không xác minh được: loại cả hộp thư lẫn số điện thoại cùng khối, kèm lý do.
+      emails.forEach((email) => {
+        notes.push({
+          kind: "excluded",
+          label: email.value,
+          detail: `Email thuộc tên miền ${email.domain}, khác website của công ty. Đã đọc ${foreignDomain} để kiểm nhưng ${verdict.why} — chưa đủ căn cứ, nên để người xem lại thay vì ghi thành liên hệ của công ty.`,
+          sourceUrl: email.sourceUrl,
+        });
+      });
+      dropDeferredPhones(
+        foreignDomain,
+        `Số này nằm cùng khối với email trên tên miền ${foreignDomain}, mà tên miền đó chưa xác minh được là của công ty — nên không ghi thành liên hệ.`,
+      );
+      log(`tên miền khác: ${foreignDomain} — ${verdict.why}; loại ${emails.length} hộp thư khỏi kênh công ty`);
+    }
+
+    // Phòng xa: không còn kênh nào mang trạng thái chờ.
+    for (let index = channels.length - 1; index >= 0; index -= 1) {
+      if (!channels[index].deferredForeign) continue;
+      const channel = channels[index];
+      const pending = channel.deferredForeign;
+      notes.push({
+        kind: "excluded",
+        label: `${pending?.published ?? channel.value}${pending ? ` · ${pending.domain}` : ""}`,
+        detail: "Số này nằm cùng khối với một email chưa xác minh được là của công ty — không ghi thành liên hệ.",
+        sourceUrl: channel.sourceUrl,
+      });
+      channels.splice(index, 1);
+    }
   }
 
   // ---------------------------------------------------- bước 3: nguồn cấp 2 ---
@@ -352,11 +548,11 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
       }
     };
 
-    const nextPages = extraUrls.slice(0, maxExtra).filter(allowedExtra);
+    const nextPages = extraUrls.slice(0, maxExtra).filter(allowedExtra).filter(keepDiscovered);
     const blocked = extraUrls.slice(0, maxExtra).filter((url) => !allowedExtra(url));
     blocked.forEach((url) => pages.push({ url, status: "skipped", reason: "robots.txt chặn", channels: 0 }));
 
-    const nextDocuments = extraDocuments.slice(0, Math.min(maxExtra, DEFAULT_SECONDARY_DOCUMENTS)).filter(allowedExtra);
+    const nextDocuments = extraDocuments.slice(0, Math.min(maxExtra, DEFAULT_SECONDARY_DOCUMENTS)).filter(allowedExtra).filter(keepDiscovered);
 
     for (const url of nextPages) {
       if (stopBecauseDeadline("đọc thêm nguồn cấp 2")) break;
@@ -443,6 +639,7 @@ export async function runConnector(seedInput: string, options: RunConnectorOptio
     notes: dedupedNotes,
     pagesFetched,
     ...(identityMatched === undefined ? {} : { identityMatched }),
+    ...(siblingDomains.length > 0 ? { siblingDomains } : {}),
     ...(siteDescription ? { description: siteDescription } : {}),
     ...(stoppedEarly ? { stoppedEarly } : {}),
   };

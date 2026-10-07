@@ -278,8 +278,12 @@ export function buildConnectorReport(input: ConnectorReportInput): {
   }
 
   // Những trang đã đọc nhưng không cho ra kênh nào vẫn là nguồn đã kiểm: người
-  // đọc thấy được phạm vi đã đọc, không phải đoán.
-  const readPages = result.pages.filter((page) => typeof page.status === "number" && page.status < 400).slice(0, 6);
+  // đọc thấy được phạm vi đã đọc, không phải đoán. Trang chỉ đọc để **xác minh
+  // quan hệ tên miền** không tính: nó không chống lưng cho giá trị nào, và đưa
+  // vào đây sẽ làm report của công ty này liệt kê website của tên miền khác.
+  const readPages = result.pages
+    .filter((page) => !page.relationCheck && typeof page.status === "number" && page.status < 400)
+    .slice(0, 6);
   for (const page of readPages) {
     if (page.url === website) continue;
     evidence.push({

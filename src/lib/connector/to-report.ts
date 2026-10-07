@@ -33,7 +33,11 @@ export function channelToContact(channel: FoundChannel): Contact {
     value: channel.value,
     type: channel.type === "whatsapp" ? "whatsapp" : channel.type === "form" || channel.type === "link" ? "website" : channel.type,
     verified: channel.policy === "outreach_ready",
-    source: hostOf(channel.sourceUrl),
+    // Giá trị nằm trên tên miền khác của cùng công ty: nói thẳng ra, kèm căn cứ,
+    // để người đọc không phải tự đoán vì sao có địa chỉ lạ trong report.
+    source: channel.siblingDomain
+      ? `${channel.siblingDomain.domain} · cùng công ty (${channel.siblingDomain.verifiedBy})`
+      : hostOf(channel.sourceUrl),
     certainty: channel.certainty,
     identityMatch: channel.identityMatch,
     personName: channel.personName,

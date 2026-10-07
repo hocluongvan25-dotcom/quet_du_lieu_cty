@@ -13,7 +13,7 @@
  */
 
 import { registrableDomain } from "@/lib/connector/html";
-import { foldName, nameSlug } from "@/lib/connector/identity";
+import { foldName, nameSlug, nameTokens, stripLegalSuffix } from "@/lib/connector/identity";
 import type { SearchHit } from "@/lib/connector/secondary";
 
 /**
@@ -99,14 +99,15 @@ function isHomepage(url: string): boolean {
  * hợp lý.
  */
 export function pickOfficialDomain(hits: SearchHit[], companyName: string): DomainCandidate | null {
-  const slug = nameSlug(companyName);
-  const foldedName = foldName(companyName);
-  if (!slug) return null;
+  const tokens = nameTokens(companyName);
+  const eligible = tokens.filter((token) => token.length >= 3);
+  const scored = eligible.length > 0 ? eligible : tokens;
+  const foldedName = foldName(stripLegalSuffix(companyName));
 
   // Tên cụt (1–3 ký tự) khớp vu vơ ở khắp nơi — "AC" nằm trong "machinery.com".
   // Với những tên đó, hàm này **không đoán**: trả null để người dùng dán link.
   // Đoán ở đây thì report sẽ rất gọn ghẽ và rất sai.
-  if (slug.length < 4) return null;
+  if (nameSlug(companyName).length < 4 || scored.length === 0) return null;
 
   type Scored = DomainCandidate & { firstSeen: number };
   const best = new Map<string, Scored>();
@@ -118,19 +119,20 @@ export function pickOfficialDomain(hits: SearchHit[], companyName: string): Doma
     if (!domain || NOT_COMPANY_SITES.has(domain)) return;
 
     const label = domain.split(".")[0] ?? "";
-    // Tên có trong tên miền: "vinamilk" trong vinamilk.com.vn — hoặc tên công ty
-    // dài hơn nhãn tên miền, như "Sun-Maid Growers Of California" với sunmaid.com.
-    const hostHasName = foldName(host).includes(slug) || (label.length >= 4 && slug.includes(label));
-    const titleHasName = foldName(`${hit.title} ${hit.snippet}`).includes(foldedName || slug);
+    // Điểm khớp tên = **bao nhiêu phần của tên** nằm trong tên miền, chứ không
+    // phải "có khớp hay không". Đây là chỗ sửa ca Tyson: "Tyson Foods, Inc." khớp
+    // cả `tyson.com` lẫn `tysonfoods.com` theo kiểu cũ, nên kết quả phụ thuộc thứ
+    // tự search trả về — và trang B2C thắng, sai hẳn ý người dùng.
+    const covered = scored.filter((token) => label.includes(token));
+    const coverage = covered.length / scored.length;
+    const titleText = foldName(`${hit.title} ${hit.snippet}`);
+    const titleHasName = (foldedName.length >= 4 && titleText.includes(foldedName)) || (scored.length > 0 && scored.every((token) => titleText.includes(token)));
 
-    if (!hostHasName && !titleHasName) return;
+    if (covered.length === 0 && !titleHasName) return;
 
     const why: string[] = [];
-    let score = 0;
-    if (hostHasName) {
-      score += 3;
-      why.push("tên công ty nằm trong tên miền");
-    }
+    let score = Math.round(coverage * 6);
+    if (covered.length > 0) why.push(`${covered.length}/${scored.length} từ của tên nằm trong tên miền (${covered.join(", ")})`);
     if (titleHasName) {
       score += 2;
       why.push("kết quả tìm kiếm nhắc đúng tên công ty");
@@ -151,9 +153,13 @@ export function pickOfficialDomain(hits: SearchHit[], companyName: string): Doma
   return { domain: winner.domain, url: winner.url, why: winner.why, score: winner.score };
 }
 
-/** Câu truy vấn đi tìm website. Giữ tên trong dấu ngoặc kép để bớt kết quả nhiễu. */
+/**
+ * Câu truy vấn đi tìm website. Giữ tên trong dấu ngoặc kép để bớt kết quả nhiễu,
+ * và **bỏ hậu tố pháp lý**: máy tìm kiếm trả kết quả tốt hơn với `"Tyson Foods"`
+ * hơn là `"Tyson Foods, Inc."`, vì "Inc." có mặt trong tên của hàng nghìn công ty.
+ */
 export function websiteQueryFor(companyName: string, country?: string | null): string {
-  const name = companyName.trim().replace(/"/g, "");
+  const name = stripLegalSuffix(companyName.trim()).replace(/"/g, "").trim();
   if (!name) return "";
   return country ? `"${name}" ${country} official website` : `"${name}" official website`;
 }

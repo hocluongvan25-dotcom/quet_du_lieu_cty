@@ -82,6 +82,10 @@ async function main() {
     "secondary/blocked-supplier.html": await readFile(path.join(fixtures, "secondary/blocked-supplier.html"), "utf8"),
     "secondary/robots.txt": await readFile(path.join(fixtures, "secondary/robots.txt"), "utf8"),
     "secondary/sitemap.xml": await readFile(path.join(fixtures, "secondary/sitemap.xml"), "utf8"),
+    "sibling/site-home.html": await readFile(path.join(fixtures, "sibling/site-home.html"), "utf8"),
+    "sibling/contact.html": await readFile(path.join(fixtures, "sibling/contact.html"), "utf8"),
+    "sibling/brand-home.html": await readFile(path.join(fixtures, "sibling/brand-home.html"), "utf8"),
+    "sibling/generic-store.html": await readFile(path.join(fixtures, "sibling/generic-store.html"), "utf8"),
     "supplier-guide.pdf": pdfPlain,
     "annual-report-2025.pdf": pdfCompressed,
     "quality-certification.pdf": pdfScanned,
@@ -94,7 +98,7 @@ import { extractFromPage, metaDescription } from "@/lib/connector/extract";
 import { mentionsName, nameSlug, foldName } from "@/lib/connector/identity";
 import { normalizeSeed, collectCandidateLinks } from "@/lib/connector/discover";
 import { parseRobots, isPathAllowed } from "@/lib/connector/robots";
-import { htmlToLines, registrableDomain } from "@/lib/connector/html";
+import { htmlToLines, registrableDomain, isNonProductionHost } from "@/lib/connector/html";
 import { assertPublicUrl, isBlockedAddress, UnsafeUrlError } from "@/lib/connector/safety";
 import { pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString } from "@/lib/connector/pdf";
 import { extractFromLines } from "@/lib/connector/extract";
@@ -106,7 +110,7 @@ import { searchSite, harvestUrlsFromSearch, buildSearchRequest, buildOpenSearchR
 import { buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck } from "@/lib/connector/whatsapp";
 import { asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT } from "@/lib/connector/fetch";
 
-export const api = { runConnector, extractFromPage, metaDescription, mentionsName, nameSlug, foldName, buildOpenSearchRequest, searchOpenWeb, parseOpenHits, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, buildOpenSearchRequest, searchOpenWeb, parseOpenHits, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, nearMissBuyingDoors, secondaryReason, collapseFormChannels, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, DEFAULT_SEC_USER_AGENT, readCikFromEdgarFeed, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT, lookupSecEdgar, lookupRegistry, registriesForCountry };
+export const api = { runConnector, extractFromPage, metaDescription, mentionsName, nameSlug, foldName, buildOpenSearchRequest, searchOpenWeb, parseOpenHits, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, isNonProductionHost, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, buildOpenSearchRequest, searchOpenWeb, parseOpenHits, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, nearMissBuyingDoors, secondaryReason, collapseFormChannels, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, DEFAULT_SEC_USER_AGENT, readCikFromEdgarFeed, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT, lookupSecEdgar, lookupRegistry, registriesForCountry };
 `;
   await mkdir(workDir, { recursive: true });
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
@@ -173,11 +177,12 @@ async function runChecks(api, files) {
   const patternGuesses = ["s.nygard@mariani.com", "stacy.nygard@mariani.com", "bella.huk@mariani.com", "joe.flannigan@mariani.com", "procurement@mariani.com", "sales@mariani.com"];
   check("KHÔNG sinh email theo pattern", !values.some((value) => patternGuesses.includes(value.toLowerCase())), values.join(", "));
   check("mọi email đều có nguyên văn trên trang", contact.channels.filter((c) => c.type === "email").every((c) => files["contact-us.html"].includes(c.value)));
-  const excludedEmails = contact.notes.filter((note) => note.kind === "excluded");
-  check("email của bên thứ ba vào mục đã loại trừ", excludedEmails.some((note) => note.label === "mariani@worldpantry.com"));
-  check("ghi rõ lý do loại trừ là khác tên miền", excludedEmails.some((note) => note.detail.includes("worldpantry.com")));
+  // Quyết định loại trừ giờ nằm ở **tầng lần chạy**: phải đọc trang của tên miền
+  // kia rồi mới biết đó là bên thứ ba hay chính công ty (xem khối "tên miền cùng
+  // công ty" bên dưới). Tầng trang chỉ ghi lại hộp thư ngoài tên miền để chờ.
+  check("tầng trang để hộp thư ngoài tên miền chờ xác minh, không tự loại", contact.foreignEmails?.some((email) => email.value === "mariani@worldpantry.com") === true);
+  check("và giữ nguyên câu chữ đã thấy hộp thư đó", contact.foreignEmails?.every((email) => email.evidenceSnippet.length > 0) === true);
   check("KHÔNG nhận số của web store thành số công ty", !values.includes("+19895141459"), values.join(", "));
-  check("và cảnh báo số đó cùng khối với email bên thứ ba", excludedEmails.some((note) => note.label.includes("989-514-1459")));
   check("KHÔNG dùng fax làm kênh liên hệ chính", !values.includes("+17074522973") || values.length > 0);
 
   section("người và kênh công bố theo tên");
@@ -280,6 +285,11 @@ async function runChecks(api, files) {
     }
   }), requested.join("\n    "));
   check("không gọi link Facebook", !requested.some((url) => url.includes("facebook.com")));
+
+  const excludedEmails = result.notes.filter((note) => note.kind === "excluded");
+  check("lần chạy: email của bên thứ ba vào mục đã loại trừ", excludedEmails.some((note) => note.label === "mariani@worldpantry.com"));
+  check("lần chạy: ghi rõ lý do loại trừ là khác tên miền", excludedEmails.some((note) => note.detail.includes("worldpantry.com")));
+  check("lần chạy: và cảnh báo số đó cùng khối với email bên thứ ba", excludedEmails.some((note) => note.label.includes("989-514-1459")));
   const phoneChannels = result.channels.filter((channel) => channel.type === "phone");
   check(
     "gộp kênh: số điện thoại xuất hiện ở 2 trang chỉ còn 1 dòng, fax tách riêng",
@@ -1353,6 +1363,122 @@ async function runChecks(api, files) {
   check("hết thời gian ⇒ dừng trước khi đọc trang nào", deadlineRun.pagesFetched === 0, String(deadlineRun.pagesFetched));
   check("và nói rõ vì sao dừng, không im lặng trả rỗng", typeof deadlineRun.stoppedEarly === "string" && deadlineRun.stoppedEarly.includes("hết thời gian"), String(deadlineRun.stoppedEarly));
   check("có ghi chú cho người kiểm đọc", deadlineRun.notes.some((note) => note.detail.includes("chưa đầy đủ")));
+
+  section("hai lỗi lặt vặt nhìn thấy trong lần chạy thật");
+
+  // `mailto:%20comments@tyson.com` là hộp thư thật `comments@tyson.com`: dấu cách
+  // thừa ở đầu bị mã hoá URL. Không giải mã thì report hiện một địa chỉ trông như
+  // rác, và cùng một hộp thư thành hai dòng.
+  const mailtoHtml = '<html><body><a href="mailto:%20comments@tyson.com">Email us</a><p>Or write to comments@tyson.com</p></body></html>';
+  const mailtoExtraction = api.extractFromPage({ url: "https://www.tyson.com/contact-us", html: mailtoHtml });
+  const mailtoValues = mailtoExtraction.channels.filter((channel) => channel.type === "email").map((channel) => channel.value);
+  check("giải mã %20 trong mailto:", !mailtoValues.some((value) => value.includes("%20")), mailtoValues.join(", "));
+  check("và cùng một hộp thư chỉ còn MỘT dòng", mailtoValues.filter((value) => value.toLowerCase() === "comments@tyson.com").length === 1, mailtoValues.join(", "));
+
+  check("stage.tyson.com là host thử nghiệm", api.isNonProductionHost("https://stage.tyson.com/recipes/x") === true);
+  check("www-dev.tysonfoods.com cũng vậy", api.isNonProductionHost("https://www-dev.tysonfoods.com/news/x") === true);
+  check("www.tysonfoods.com thì không", api.isNonProductionHost("https://www.tysonfoods.com/contact-us") === false);
+  check("tên miền hai phần không bị coi là thử nghiệm", api.isNonProductionHost("https://tyson.com/") === false);
+  check("tên miền có nhãn 'test' ở tên thật vẫn bị coi là thử nghiệm (và không được đọc)", api.isNonProductionHost("https://test.tysonfoods.com/") === true);
+  check("tên miền .com.vn nhiều phần vẫn xử lý đúng", api.isNonProductionHost("https://stage.vinamilk.com.vn/") === true && api.isNonProductionHost("https://www.vinamilk.com.vn/") === false);
+
+  section("tên miền khác của cùng công ty (ca Tyson: tyson.com ↔ tysonfoods.com)");
+
+  const siblingRequested = [];
+  // `make` của mock chính nằm trong closure của nó, nên khối này tự dựng response.
+  const respond = (originalUrl, body, contentType = "text/html; charset=utf-8", status = 200, finalUrl) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    url: finalUrl ?? String(originalUrl),
+    headers: { get: () => contentType },
+    text: async () => body,
+  });
+  const make = (body, contentType, status, finalUrl) => respond(fetchUrl, body, contentType, status, finalUrl);
+  let fetchUrl = "";
+  const siblingFetch = async (url) => {
+    fetchUrl = String(url);
+    siblingRequested.push(String(url));
+    const parsed = new URL(String(url));
+    const host = parsed.hostname.replace(/^www\./, "");
+    if (host === "tysonfoods.com" || host === "www.tysonfoods.com") {
+      if (parsed.pathname === "/robots.txt") return make("User-agent: *", "text/plain", 200);
+      if (parsed.pathname === "/") return make(files["sibling/site-home.html"]);
+      if (parsed.pathname.startsWith("/contact")) return make(files["sibling/contact.html"]);
+      return make("not found", "text/html", 404);
+    }
+    if (host === "tyson.com") return make(files["sibling/brand-home.html"]);
+    if (host === "tysonfoods-online.com") return make(files["sibling/generic-store.html"]);
+    return make("not found", "text/html", 404);
+  };
+
+  const siblingRun = await api.runConnector("tysonfoods.com", {
+    fetchImpl: siblingFetch,
+    maxPages: 3,
+    delayMs: 0,
+    guard: noGuard,
+    companyName: "Tyson Foods, Inc.",
+    secondary: false,
+    log: () => {},
+  });
+
+  const b2bEmail = siblingRun.channels.find((channel) => channel.value === "InternationalInquiry@tyson.com");
+  check("hộp thư trên tên miền khác ĐƯỢC nhận khi có căn cứ cùng công ty", Boolean(b2bEmail), siblingRun.channels.map((c) => c.value).join(", "));
+  check("và mang theo căn cứ đã kiểm, để người đọc tự đối chiếu", (b2bEmail?.siblingDomain?.verifiedBy ?? "").includes("Tyson Foods"), JSON.stringify(b2bEmail?.siblingDomain));
+  check("nguồn vẫn là trang đã thấy hộp thư đó", b2bEmail?.sourceUrl === "https://tysonfoods.com/contact", String(b2bEmail?.sourceUrl));
+  check("câu chữ bằng chứng giữ nguyên", b2bEmail?.evidenceSnippet.includes("InternationalInquiry@tyson.com") === true, String(b2bEmail?.evidenceSnippet));
+  check("hộp thư đó vẫn phải kiểm hộp thư trước khi dùng", b2bEmail?.policy === "needs_mailbox_check");
+  check("hộp thư trao đổi quốc tế được xếp vào bộ phận, không phải hộp thư chung", b2bEmail?.identityMatch === "department", String(b2bEmail?.identityMatch));
+  check("lần chạy ghi lại tên miền cùng công ty đã xác minh", siblingRun.siblingDomains?.some((entry) => entry.domain === "tyson.com") === true, JSON.stringify(siblingRun.siblingDomains));
+
+  const ethicsPhone = siblingRun.channels.find((channel) => channel.value.includes("3017304") || channel.value.includes("1-888-301-7304"));
+  check("số điện thoại cùng khối với hộp thư đó cũng được nhận", Boolean(ethicsPhone), siblingRun.channels.map((c) => c.value).join(", "));
+  check("và không còn mang trạng thái chờ xác minh", ethicsPhone?.deferredForeign === undefined);
+  check("không còn hộp thư nào bị loại kèm lý do 'khác website' trong ca này", !siblingRun.notes.some((note) => note.label === "InternationalInquiry@tyson.com"));
+  check("trang đọc để xác minh quan hệ được đánh dấu riêng", siblingRun.pages.some((page) => page.relationCheck === true && page.url.includes("tyson.com")));
+  const countedPages = siblingRun.pages.filter((page) => !page.relationCheck && page.status !== "skipped").length;
+  check("và KHÔNG tính vào số trang của công ty", siblingRun.pagesFetched === countedPages, `${siblingRun.pagesFetched} vs ${countedPages}`);
+  check(
+    "chỉ đọc trang chủ của tên miền kia, không đi sâu vào đó",
+    siblingRequested.filter((url) => new URL(url).hostname.replace(/^www\./, "") === "tyson.com").length === 1,
+    siblingRequested.filter((url) => url.includes("tyson.com") && !url.includes("tysonfoods.com")).join(", "),
+  );
+
+  // Cùng thương hiệu nhưng trang kia không nói gì về công ty: KHÔNG nhận.
+  const unverifiedFetch = async (url) => {
+    fetchUrl = String(url);
+    const parsed = new URL(String(url));
+    const host = parsed.hostname.replace(/^www\./, "");
+    if (host === "tysonfoods.com") {
+      if (parsed.pathname === "/robots.txt") return make("User-agent: *", "text/plain", 200);
+      if (parsed.pathname === "/") return make(files["sibling/site-home.html"]);
+      if (parsed.pathname.startsWith("/contact")) return make(files["sibling/contact.html"]);
+      return make("not found", "text/html", 404);
+    }
+    if (host === "tyson.com") return make(files["sibling/generic-store.html"]);
+    return make("not found", "text/html", 404);
+  };
+  const unverifiedRun = await api.runConnector("tysonfoods.com", {
+    fetchImpl: unverifiedFetch,
+    maxPages: 3,
+    delayMs: 0,
+    guard: noGuard,
+    companyName: "Tyson Foods, Inc.",
+    secondary: false,
+    log: () => {},
+  });
+  check("cùng thương hiệu nhưng không có căn cứ ⇒ KHÔNG nhận hộp thư", !unverifiedRun.channels.some((channel) => channel.value === "InternationalInquiry@tyson.com"));
+  check(
+    "và nói rõ đã đọc tên miền kia để kiểm mà không đủ căn cứ",
+    unverifiedRun.notes.some((note) => note.label === "InternationalInquiry@tyson.com" && note.detail.includes("Đã đọc tyson.com để kiểm")),
+    unverifiedRun.notes.filter((note) => note.kind === "excluded").map((note) => note.detail).join(" | "),
+  );
+  check("số điện thoại cùng khối cũng bị loại kèm lý do", unverifiedRun.notes.some((note) => note.label.includes("1-888-301-7304")));
+  check(
+    "chỉ nhận đúng hai hộp thư có thật trên trang, không sinh thêm địa chỉ nào",
+    siblingRun.channels.filter((channel) => channel.type === "email").length === 2 &&
+      siblingRun.channels.filter((channel) => channel.type === "email").every((channel) => channel.siblingDomain?.domain === "tyson.com"),
+    siblingRun.channels.filter((channel) => channel.type === "email").map((channel) => channel.value).join(", "),
+  );
 
   section("đầu vào sai");
   const bad = await api.runConnector("", { fetchImpl: mockFetch, delayMs: 0, guard: noGuard, log: () => {} }).then(() => false).catch(() => true);
