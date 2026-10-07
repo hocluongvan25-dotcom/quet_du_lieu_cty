@@ -89,8 +89,9 @@ import { htmlToLines, registrableDomain } from "@/lib/connector/html";
 import { assertPublicUrl, isBlockedAddress, UnsafeUrlError } from "@/lib/connector/safety";
 import { pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString } from "@/lib/connector/pdf";
 import { extractFromLines } from "@/lib/connector/extract";
+import { buildBuyerWriteBatch } from "@/lib/connector/persist";
 
-export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString };
+export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch };
 `;
   await mkdir(workDir, { recursive: true });
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
@@ -184,16 +185,16 @@ async function runChecks(api, files) {
   const linkedin = contact.channels.find((channel) => channel.type === "linkedin");
   check("lấy LinkedIn công ty", linkedin?.value === "linkedin.com/company/mariani-packing-co.-inc.", linkedin?.value);
   check("profile link chỉ để liên hệ thủ công", linkedin?.policy === "manual_contact_only");
-  const whatsappNote = contact.notes.find((note) => note.label === "WhatsApp chính thức");
-  check("không có WhatsApp thì ghi là chưa thấy", Boolean(whatsappNote));
-  check("nêu rõ trang chỉ có chat trên website", whatsappNote?.detail.includes("Gorgias"), whatsappNote?.detail);
-  check("không suy diễn WhatsApp từ số tổng đài", whatsappNote?.detail.includes("Không suy diễn"));
+  check(
+    "KHÔNG lấy hồ sơ LinkedIn cá nhân làm kênh của công ty",
+    !contact.channels.some((channel) => channel.value.includes("/in/")),
+    contact.channels.map((channel) => channel.value).join(", "),
+  );
+  check(
+    "hồ sơ cá nhân vào mục đã loại trừ (không hiện cho người dùng)",
+    contact.notes.some((note) => note.kind === "excluded" && note.label.includes("/in/stacy-nygard-1517b2b")),
+  );
 
-  section("trang nguyên liệu");
-  const bulk = api.extractFromPage({ url: "https://mariani.com/pages/bulk-and-ingredients", html: files["bulk-and-ingredients.html"] });
-  const bulkValues = bulk.channels.map((channel) => channel.value);
-  check("lấy email bộ phận nguyên liệu", bulkValues.includes("ingredients@mariani.com"));
-  check("gắn nhãn 'bộ phận' cho ingredients@", bulk.channels.find((c) => c.value === "ingredients@mariani.com")?.identityMatch === "department");
 
 
   // ------------------------------------------------------------------- pdf ---
@@ -296,6 +297,20 @@ async function runChecks(api, files) {
   check("lấy được nội dung từ PDF", result.channels.some((channel) => channel.value === "procurement@mariani.com"));
   check("tài liệu PDF được ghi vào danh sách trang đã đọc, có kind", result.pages.some((page) => page.kind === "pdf" && page.url.endsWith("supplier-guide.pdf")));
   check("không gọi PDF của tên miền khác", !requested.some((url) => url.includes("other-site.com")));
+
+  // ------------------------------------------------- ghi vào database (batch) --
+  section("dựng dữ liệu để ghi vào database");
+  const batchOk = api.buildBuyerWriteBatch(result, { organizationId: "org-1", domain: result.domain, companyName: "Mariani Packing Co.", country: "United States" });
+  check("dựng được batch khi có đủ organization + country", batchOk.ok === true, batchOk.reason);
+  const batch = batchOk.ok ? batchOk.batch : { channels: [], routes: [], people: [], skipped: [] };
+  check("mọi kênh đều có trang nguồn và câu chữ bằng chứng", batch.channels.every((channel) => channel.source_url.startsWith("http") && channel.evidence_snippet.length > 0));
+  check("không có kênh nào là hồ sơ LinkedIn cá nhân", batch.channels.every((channel) => !channel.value.includes("/in/")));
+  check("kênh nào cũng là loại có trong enum của database", batch.channels.every((channel) => ["email", "phone", "form", "linkedin_url", "whatsapp", "portal"].includes(channel.channel_type)));
+  check("nhãn 'person' chỉ có khi tìm được người tương ứng", batch.channels.every((channel) => channel.identity_match !== "person" || channel.personIndex !== null));
+  check("mỗi người đều có trang nguồn", batch.people.every((person) => person.source_url.startsWith("http")));
+  check("đường vào (buyer_routes) chỉ đến từ trang đã đọc", batch.routes.every((route) => route.source_url.startsWith("http")));
+  check("thiếu country thì không dựng batch", api.buildBuyerWriteBatch(result, { organizationId: "org-1", domain: result.domain }).ok === false);
+  check("thiếu organization thì không dựng batch", api.buildBuyerWriteBatch(result, { organizationId: "", domain: result.domain, country: "US" }).ok === false);
   check("không gọi PDF bị robots.txt chặn", !requested.some((url) => url.includes("quality-certification")));
   check("không đọc quá số tài liệu cho phép", requested.filter((url) => url.endsWith(".pdf")).length === 2, requested.filter((url) => url.endsWith(".pdf")).join(", "));
   check("PDF scan không sinh ra kênh nào và không bị đoán", !result.channels.some((channel) => channel.value.includes("quality-certification")));

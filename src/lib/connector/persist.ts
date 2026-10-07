@@ -109,8 +109,9 @@ export type SaveResult =
 
 // ------------------------------------------------------------ dựng dữ liệu ---
 
-function clean(value: string) {
-  return value.trim();
+/** Chuỗi an toàn: dữ liệu vào đây có thể đến từ request, không giả định là string. */
+function clean(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function keyOf(value: string) {
@@ -163,7 +164,7 @@ export function buildBuyerWriteBatch(
   const domain = hostFromDomain(clean(input.domain || result.domain));
   if (!domain) return { ok: false, reason: "Thiếu tên miền — không rõ đang ghi về công ty nào." };
 
-  const country = clean(input.country ?? "");
+  const country = clean(input.country);
   if (!country) {
     return {
       ok: false,
@@ -171,7 +172,7 @@ export function buildBuyerWriteBatch(
     };
   }
 
-  const name = clean(input.companyName ?? "") || domain;
+  const name = clean(input.companyName) || domain;
   const skipped: { value: string; reason: string }[] = [];
 
   // ------------------------------------------------------------------ người --
@@ -233,6 +234,14 @@ export function buildBuyerWriteBatch(
 
     if (channel.certainty === "inferred") {
       skipped.push({ value, reason: "kênh được suy ra theo pattern — connector không ghi dạng này" });
+      return;
+    }
+
+    // Hồ sơ LinkedIn cá nhân không phải kênh liên hệ của công ty. extract.ts đã
+    // bỏ chúng từ trước; đây là lớp chặn thứ hai để một thay đổi sau này không
+    // âm thầm đưa chúng vào database.
+    if (channelType === "linkedin_url" && /\/in\//i.test(value)) {
+      skipped.push({ value, reason: "hồ sơ LinkedIn cá nhân, không phải kênh liên hệ của công ty" });
       return;
     }
 
