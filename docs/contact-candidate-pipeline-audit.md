@@ -3,11 +3,13 @@
 Ngày kiểm: 06/10/2026. Người kiểm: đối chiếu trực tiếp schema + code trong repo, không đọc từ trí nhớ.
 Mọi dòng dưới đây ghi kèm `file:dòng` để tự kiểm lại.
 
+**Cập nhật 07/10/2026 — việc #1 ở mục E đã xong.** Tầng ghi kết quả connector vào database đã được viết (`src/lib/connector/persist.ts`), nối vào `POST /api/connector`, và kiểm bằng `npm run persist:test` (46 check, ghi vào Postgres thật rồi đọc lại qua chính view của ứng dụng). Chi tiết: spec §17. Các mục 2–6 ở phần E vẫn còn nguyên.
+
 ## Trả lời ngắn
 
 | Câu hỏi | Trả lời |
 | --- | --- |
-| **1. Code đã chạy đúng luồng 5 bước + 5 cổng chưa?** | **Chưa.** Bước 2 (nguồn cấp 1) và bước 4 (trích xuất có bằng chứng) **đã có**; 5 cổng mới có **4 cổng ở dạng một phần**; bước 1 (resolve pháp nhân từ tờ khai hải quan) và bước 3 (nguồn cấp 2) **chưa có**; và **kết quả connector chưa được ghi vào database** nên pipeline chưa khép kín. |
+| **1. Code đã chạy đúng luồng 5 bước + 5 cổng chưa?** | **Chưa.** Bước 2 (nguồn cấp 1) và bước 4 (trích xuất có bằng chứng) **đã có**; 5 cổng mới có **4 cổng ở dạng một phần**; bước 1 (resolve pháp nhân từ tờ khai hải quan) và bước 3 (nguồn cấp 2) **chưa có**; và **kết quả connector chưa được ghi vào database** nên pipeline chưa khép kín — **chỗ này đã sửa 07/10/2026**, xem cập nhật ở đầu tài liệu và spec §17. |
 | **2. `contact_candidates` đã lưu `evidence_quote` và `source_urls` chưa?** | **Chưa — và đây là chỗ thiết kế đang lệch model.** Bảng `contact_candidates` **không có** hai cột đó; nó có `pattern_used` + `inference_basis` (bắt buộc khác rỗng). Bằng chứng (`source_url` + `evidence_snippet`) nằm ở bảng **`contact_channels`** — lớp "kênh quan sát được". Quan trọng hơn: **chưa có dòng code nào trong `src/` ghi vào `contact_candidates`** — chỉ migration và test SQL nhắc tới nó. |
 
 ---
@@ -42,15 +44,17 @@ Thiết kế dùng 3 trạng thái; hệ thống đang dùng 2 trục (quan sát
 | **Public Lead / Human Review** | `contact_candidates` (`status = 'proposed'`/`'queued'`, `pattern_used` + `inference_basis`) và kênh có `blocked_reason` thuộc `identity_unconfirmed` / `deliverability_unchecked` / `manual_contact_only` — `exportable = true` nhưng **không** `outreach_eligible`; UI phải nói rõ lý do. |
 | **No Contact Found** | Không có dòng nào. Report trả về kênh chung + biểu mẫu liên hệ của công ty (`extract.ts` `type: "form"`) và `buyer_routes` (vendor registration / supplier portal / RFQ — `006:55`). Theo yêu cầu của bạn, danh sách "không tìm thấy" **không hiển thị** cho người dùng, chỉ ghi nội bộ trong `ConnectorResult.notes`. |
 
-## D. Chỗ lệch lớn nhất: chưa khép kín vòng lưu dữ liệu
+## D. Chỗ lệch lớn nhất: chưa khép kín vòng lưu dữ liệu — **đã xử lý 07/10/2026**
 
 `POST /api/connector` chạy xong trả JSON và tự khai `persisted: false` (`src/app/api/connector/route.ts:78`). Không có `insert` nào vào `contact_channels`, `contact_candidates`, `decision_makers` hay `buyer_profiles` — trong toàn bộ `src/` chỉ có 3 chỗ ghi database: `company_reports`, `source_evidence` (`src/app/api/research/route.ts:196,204`) và `organization_members` (`src/app/api/team/invite/route.ts:103`).
 
 Nghĩa là: **trích xuất thì có bằng chứng, nhưng chưa có gì lưu bằng chứng ấy.** Đây là việc lớn nhất còn thiếu, và nó đứng trước cả 5 cổng — vì cổng là quy tắc trên dữ liệu đã lưu.
 
+**Tình trạng sau khi sửa:** `/api/connector` ghi kết quả vào `buyer_profiles` / `decision_makers` / `contact_channels` / `buyer_routes` khi có phiên đăng nhập + `country`, trả `persisted` kèm số dòng và lý do khi không ghi được. `contact_candidates` vẫn trống sau mỗi lần ghi (connector không đoán email theo pattern).
+
 ## E. Cần bù, theo thứ tự nên làm
 
-1. **Ghi kết quả connector vào DB** (việc lớn nhất, mở khoá mọi thứ khác): upsert `buyer_profiles` theo `domain`, ghi `contact_channels` (`value`, `channel_type`, `identity_match`, `certainty`, `source_url`, `evidence_snippet`, `discovered_by = 'web_research_agent'`), ghi người vào `decision_makers`, ghi form/vendor registration vào `buyer_routes`. Ghi kèm `report.requirements` đã có.
+1. ~~**Ghi kết quả connector vào DB**~~ — **xong 07/10/2026** (`src/lib/connector/persist.ts`, spec §17, `npm run persist:test`). Việc này gồm: upsert `buyer_profiles` theo `domain`, ghi `contact_channels` (`value`, `channel_type`, `identity_match`, `certainty`, `source_url`, `evidence_snippet`, `discovered_by = 'web_research_agent'`), ghi người vào `decision_makers`, ghi form/vendor registration vào `buyer_routes`. Ghi kèm `report.requirements` đã có.
 2. **Siết bằng chứng ở tầng DB**: hiện `evidence_snippet` còn cho phép NULL; nếu muốn đúng thiết kế "bắt buộc evidence" thì thêm ràng buộc `certainty = 'confirmed' ⇒ evidence_snippet khác rỗng` (source_url đã bắt buộc rồi).
 3. **Cổng Role + Email thành cổng thật**: thêm enum `role_kind` (procurement/purchasing/sourcing/sales/other) và `email_kind` (`published_named` / `published_role_mailbox` / `inferred_unverified`) để cổng có thứ để chặn, thay vì suy từ local part mỗi lần.
 4. **Job re-verify 90–180 ngày**: đọc lại đúng nguồn cũ, cập nhật `verified_at` / `last_seen_at`, ghi thay đổi; hết hạn thì rơi khỏi view export.

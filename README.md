@@ -71,7 +71,7 @@ The app keeps working without `.env.local`; it stays in demo mode.
 ## Connect Supabase
 
 1. Create a Supabase project.
-2. Run both files in `supabase/migrations/` in its SQL editor (in order), or use the Supabase CLI:
+2. Run every file in `supabase/migrations/` (six, in order) in its SQL editor, or use the Supabase CLI:
 
    ```bash
    supabase link --project-ref YOUR_PROJECT_REF
@@ -211,6 +211,7 @@ A line only becomes an item when it names one of those and either carries requir
 
 ```bash
 npm run requirements:test   # 24 checks: no fabrication, verbatim evidence, sources, PDF, no advice
+npm run persist:test      # 46 checks: rows built from real findings, then written into a real Postgres and read back through the app's views
 ```
 
 ### Connector: public sources to sourced channels
@@ -235,14 +236,35 @@ npm run connector:run mariani.com -- --max-pages 8 --max-documents 4
 | `discover.ts` | Page selection: contact/supplier/about pages, same domain, robots-respecting |
 | `index.ts` | `runConnector(domain)` orchestration |
 | `to-report.ts` | Maps results onto the frozen report shape |
+| `persist.ts` | Builds the database rows (pure) and writes them through a small store port: `buyer_profiles`, `decision_makers`, `contact_channels`, `buyer_routes` |
 
 ```bash
-npm run connector:test    # 98 checks on real HTML and PDF fixtures, no network needed
+npm run connector:test    # 104 checks on real HTML and PDF fixtures, no network needed
 npm run connector:run mariani.com            # real run, human readable
 npm run connector:run mariani.com -- --json  # full JSON
 ```
 
-`POST /api/connector` with `{ "domain": "mariani.com" }` does the same over HTTP. Results are returned, **not persisted** — that needs migrations 002–006 applied first.
+### Connector: findings go into the buyer tables
+
+`POST /api/connector` with `{ "domain": "mariani.com", "companyName": "Mariani Packing Co.", "country": "United States" }` does the same over HTTP, and — when there is a signed-in workspace — writes what it found into `buyer_profiles`, `decision_makers`, `contact_channels` and `buyer_routes`. The buyer list then shows the company, and `contact_export_policy` decides what may be exported.
+
+```bash
+curl -s -X POST localhost:3000/api/connector \
+  -H 'content-type: application/json' \
+  -d '{"domain":"mariani.com","companyName":"Mariani Packing Co.","country":"United States"}'
+# → { "persisted": true, "persist": { "counts": { "channels": {...}, "candidatesInserted": 0 } } }
+```
+
+Four rules the write layer cannot break, all covered by `npm run persist:test`:
+
+1. **`contact_candidates` stays empty.** That table is for pattern-guessed emails; the connector never guesses one.
+2. **`is_verified` stays `false`.** "This value is on a public page" is not "this mailbox belongs to that person", and the schema keeps the two apart.
+3. **No row without a source and a quote.** Every channel carries `source_url` plus the verbatim sentence (`evidence_snippet`) it was read from; anything missing either one is dropped and listed with a reason.
+4. **No personal LinkedIn profile as a company channel.** `/in/…` links are excluded in extraction and blocked again at the write layer.
+
+`country` is required and is never inferred from the domain suffix: missing it returns `persisted: false` with that reason instead of storing half a row. Writes go through the service role — migrations 005/006 revoke insert/update on the buyer tables from `authenticated`, so the browser cannot write buyer data — and `organization_id` always comes from the session, never from the request body.
+
+Re-running the same domain refreshes `last_seen_at` instead of duplicating channels, people or routes.
 
 ### Retention and the artifact bucket
 

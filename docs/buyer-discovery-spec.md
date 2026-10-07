@@ -409,17 +409,6 @@ Hôm nay AI mới làm phần **nhỏ nhất**, và nên nói thẳng như vậy
 
 ---
 
-## 16. Đối chiếu với thiết kế chuẩn của người dùng (06/10/2026)
-
-Người dùng đưa một thiết kế 5 bước + 5 cổng + 3 trạng thái đầu ra và hỏi code đã theo chưa. Kết quả đối chiếu đầy đủ (kèm `file:dòng`) nằm ở [`docs/contact-candidate-pipeline-audit.md`](./contact-candidate-pipeline-audit.md). Tóm tắt:
-
-- **Đã có:** bước 2 (nguồn cấp 1, kể cả PDF), bước 4 (trích xuất có `source_url` + `evidence_snippet`, không bao giờ sinh email theo pattern), cổng Domain, và phần lớn cổng Entity.
-- **Một phần:** cổng Role (có nhận diện, chưa có cổng chặn), cổng Email (chỉ email công bố, nhưng chưa có ba nhãn `published_named` / `published_role_mailbox` / `inferred_unverified`), cổng Freshness (có `verified_at` + hạn 90 ngày, chưa có job re-verify).
-- **Chưa có:** bước 1 (resolve pháp nhân từ tờ khai hải quan — chưa có dữ liệu hải quan), bước 3 (nguồn cấp 2), và **tầng ghi kết quả connector vào database**.
-- **Chỗ lệch model:** thiết kế muốn `contact_candidates` mang `evidence_quote` + `source_urls`. Hệ thống đang tách đúng theo bản chất dữ liệu: bằng chứng nằm ở `contact_channels` (`source_url` + `evidence_snippet`, DB buộc `confirmed` phải có `source_url`), còn `contact_candidates` là **giả thuyết** với `pattern_used` + `inference_basis` bắt buộc và hạn 30 ngày. Muốn theo đúng chữ của thiết kế thì cần thêm cột, nhưng thêm bằng chứng vào bảng giả thuyết sẽ làm mờ đúng ranh giới mà migration 006 dựng lên — nên ghi lại để người dùng chọn.
-
----
-
 ## 15. Điều kiện & giấy tờ nhà cung cấp phải đáp ứng (06/10/2026)
 
 Tiêu chí "điền đủ" từ đầu dự án: mọi điều khoản/giấy tờ nhà cung cấp phải đáp ứng đều phải hiện trong report. Phần này giờ đã chạy.
@@ -450,3 +439,62 @@ Report hiển thị theo thứ tự: chứng nhận → kiểm tra → giấy t�
 Yêu cầu được lưu vào `report_data.requirements` cùng report, nên mở lại report là còn nguyên.
 
 Kiểm chứng: `npm run requirements:test` — 24 check, gồm: bỏ câu tự khoe chứng nhận, giữ nguyên văn câu, mỗi mục có nguồn, gạch đầu dòng dưới tiêu đề vẫn được tính, trang không có yêu cầu thì ra 0 mục, đọc được từ PDF, và không mục nào chứa lời khuyên.
+
+---
+
+## 16. Đối chiếu với thiết kế chuẩn của người dùng (06/10/2026)
+
+Người dùng đưa một thiết kế 5 bước + 5 cổng + 3 trạng thái đầu ra và hỏi code đã theo chưa. Kết quả đối chiếu đầy đủ (kèm `file:dòng`) nằm ở [`docs/contact-candidate-pipeline-audit.md`](./contact-candidate-pipeline-audit.md). Tóm tắt:
+
+- **Đã có:** bước 2 (nguồn cấp 1, kể cả PDF), bước 4 (trích xuất có `source_url` + `evidence_snippet`, không bao giờ sinh email theo pattern), cổng Domain, và phần lớn cổng Entity.
+- **Một phần:** cổng Role (có nhận diện, chưa có cổng chặn), cổng Email (chỉ email công bố, nhưng chưa có ba nhãn `published_named` / `published_role_mailbox` / `inferred_unverified`), cổng Freshness (có `verified_at` + hạn 90 ngày, chưa có job re-verify).
+- **Chưa có:** bước 1 (resolve pháp nhân từ tờ khai hải quan — chưa có dữ liệu hải quan), bước 3 (nguồn cấp 2), và **tầng ghi kết quả connector vào database**.
+- **Chỗ lệch model:** thiết kế muốn `contact_candidates` mang `evidence_quote` + `source_urls`. Hệ thống đang tách đúng theo bản chất dữ liệu: bằng chứng nằm ở `contact_channels` (`source_url` + `evidence_snippet`, DB buộc `confirmed` phải có `source_url`), còn `contact_candidates` là **giả thuyết** với `pattern_used` + `inference_basis` bắt buộc và hạn 30 ngày. Muốn theo đúng chữ của thiết kế thì cần thêm cột, nhưng thêm bằng chứng vào bảng giả thuyết sẽ làm mờ đúng ranh giới mà migration 006 dựng lên — nên ghi lại để người dùng chọn.
+
+---
+
+---
+
+## 17. Ghi kết quả vào database — vòng lưu đã khép (07/10/2026)
+
+Trước phần này, connector đọc xong là xong: kết quả nằm trong response, đóng tab là mất, và danh sách buyer không bao giờ có công ty vừa tra. Đây là việc #1 trong bản đối chiếu (§16). Giờ đã có `src/lib/connector/persist.ts`.
+
+### Ghi gì, vào đâu
+
+| Kết quả connector | Bảng | Ghi chú |
+| --- | --- | --- |
+| Công ty (theo tên miền) | `buyer_profiles` | khoá `(organization_id, domain)`; chạy lại thì cập nhật, không thêm dòng mới |
+| Người tìm được (tên + chức danh) | `decision_makers` | hạng `b` — có tên, một nguồn công khai; hạng `a` để dành cho nguồn chính thức đối chiếu được |
+| Kênh liên hệ | `contact_channels` | `provenance = 'company_site'`, `discovered_by = 'web_research_agent'` |
+| Trang mua hàng / đăng ký nhà cung cấp / email bộ phận | `buyer_routes` | chỉ khi đường dẫn trang **đã đọc thật** khớp nghĩa — không suy từ trang liên hệ chung |
+
+### Bốn điều tuyệt đối không ghi
+
+1. **`contact_candidates` luôn trống** sau mỗi lần ghi. Bảng đó dành cho email đoán theo pattern; connector không đoán, nên nó không có gì để ghi vào đó. Test SQL khẳng định bảng trống sau khi ghi.
+2. **`is_verified` luôn `false`.** Connector chứng minh được "giá trị này có trên trang công khai", không chứng minh được "hộp thư này là của đúng người". Database phân biệt hai chuyện đó, và tầng ghi không được trộn.
+3. **Thiếu trang nguồn hoặc thiếu câu chữ thì không ghi.** Mỗi dòng phải mang `source_url` + `evidence_snippet` là nguyên văn câu chứa giá trị; thiếu một trong hai thì dòng đó bị bỏ và ghi vào `skipped` kèm lý do (không hiện cho người dùng).
+4. **Hồ sơ LinkedIn cá nhân (`/in/…`) không thành kênh của công ty.** Bị bỏ ngay từ lúc tách dữ liệu, và tầng ghi chặn lần thứ hai.
+
+### Thứ không được phép tự bịa
+
+`buyer_profiles.country` là cột bắt buộc, và tầng ghi **không suy quốc gia từ đuôi tên miền** (`.com` không nói lên gì). Thiếu `country` thì API trả `persisted: false` kèm đúng lý do, chứ không lưu một dòng nửa vời.
+
+### Ghi bằng service role
+
+Migration 005/006 thu hồi `insert/update/delete` trên các bảng buyer khỏi `authenticated`: trình duyệt không có quyền ghi dữ liệu buyer. Vì vậy tầng ghi chạy bằng service role ở server, và `organization_id` lấy từ **phiên đăng nhập**, không bao giờ lấy từ body request.
+
+### Người dùng thấy gì sau khi tra
+
+Công ty vừa tra xuất hiện trong `/vi/buyers` (view `buyer_outreach_summary` + `outreach_ready_contacts`), kèm số kênh và số người. Cái gì xuất được là do `contact_export_policy` quyết định, không do UI:
+
+- Email công bố nhưng chưa kiểm mailbox → `blocked_reason = 'deliverability_unchecked'` → **xuất được, chưa `outreach_eligible`**.
+- LinkedIn công ty → `manual_contact_only` → xuất được, không dùng để gửi tự động.
+- Hết hạn 90 ngày thì rơi khỏi danh sách xuất, không cần ai nhớ.
+
+### Kiểm chứng
+
+`npm run persist:test` — 46 check, hai phần: (1) dựng dữ liệu thuần, (2) ghi vào Postgres thật (PGlite, đủ 6 migration) rồi đọc lại bằng chính các view của ứng dụng. Trong đó có: chạy lần hai chỉ làm mới `last_seen_at` chứ không nhân đôi kênh/người/đường vào, `contact_candidates` trống, mọi dòng có nguồn, và workspace khác không đọc được dòng nào.
+
+### Còn thiếu
+
+Đúng như bản đối chiếu: enum `role_kind` / `email_kind` để Role và Email thành cổng chặn thật; job re-verify 90–180 ngày; nguồn cấp 2 (search API, sổ đăng ký); resolve pháp nhân từ dữ liệu hải quan.
