@@ -8,7 +8,7 @@
  *
  *  1. Dựng dữ liệu (hàm thuần): thiếu gì thì từ chối, thừa gì thì bỏ, và
  *     không bao giờ sinh email theo pattern.
- *  2. Ghi thật vào Postgres trong tiến trình (PGlite) với đúng 9 migration,
+ *  2. Ghi thật vào Postgres trong tiến trình (PGlite) với đúng 10 migration,
  *     rồi đọc lại qua chính các view mà ứng dụng dùng
  *     (`contact_export_policy`, `buyer_outreach_summary`, `outreach_ready_contacts`).
  *
@@ -386,9 +386,9 @@ export const api = { buildBuyerWriteBatch, saveBuyerDiscovery, COMPANY_SITE_SOUR
   check("mỗi đường vào đều có nguồn", batch.routes.every((route) => route.source_url.startsWith("http")));
 
   // ------------------------------------------------- 2. ghi vào Postgres thật --
-  section("ghi vào Postgres thật (PGlite, đủ 9 migration)");
+  section("ghi vào Postgres thật (PGlite, đủ 10 migration)");
   const { db, migrationCount } = await bootDatabase();
-  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 9, String(migrationCount));
+  check(`áp dụng đủ migration (${migrationCount})`, migrationCount === 10, String(migrationCount));
 
   await db.query(
     `insert into auth.users (id, email, raw_user_meta_data)

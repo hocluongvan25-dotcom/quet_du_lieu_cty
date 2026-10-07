@@ -640,3 +640,46 @@ Trong `contact_role_gate`, kênh **không gắn với người nào** tự độ
 - `npm run roles:test` (**33 check**, bộ mới): các ca dễ sai — "Procurement Director" vs "Sales Director" vs "Import Manager", chức danh chung chung + bộ phận cụ thể, tiếng Việt có dấu, `other` ≠ `unknown`, và nhãn hiển thị không mang lời khuyên.
 - `npm run persist:test` (**71 check**): chức danh được phân loại lúc ghi (`Procurement Manager` → `procurement`); email cạnh tên người → `published_named`, email bộ phận → `published_role_mailbox`; email tự đoán bị cổng Email chặn; DB từ chối một `email_kind` nói ngược với cách địa chỉ được công bố.
 - `npm run db:verify` (9 migration): hàm `email_kind_for` trả đúng ba nhãn; cổng Role đổi kết quả khi chức danh đổi từ `sales` sang `procurement`; kênh không gắn người vẫn qua; email chưa phân loại được thì bị giữ lại kèm lý do; hai view mới vẫn cách ly theo workspace.
+
+---
+
+## 21. Cổng Freshness: đọc lại định kỳ (07/10/2026)
+
+Cổng cuối cùng của thiết kế chuẩn. 005/006 đã có `last_seen_at`, `expires_at` (90 ngày) và lượt dọn dữ liệu hết hạn — nhưng **chưa có lần đọc lại nào**: dữ liệu cũ chỉ được xoá, chưa bao giờ được kiểm lại. Migration 010 và `src/lib/connector/reverify.ts` làm nốt phần đó.
+
+### Ba câu trả lời, không phải hai
+
+| Kết quả | Nghĩa | Hệ quả |
+| --- | --- | --- |
+| `still_present` | Mở được trang, **vẫn thấy đúng giá trị đó** | Làm mới `last_seen_at`, `expires_at`, và đẩy `verified_at` tiến lên |
+| `gone` | Mở được trang, giá trị **không còn ở đó** | Hạn về ngay → rơi khỏi danh sách xuất; mất cờ xác minh; ghi lại lý do |
+| `unreachable` | **Không mở được trang** (mạng, 404, robots, đăng nhập) | **Không thay đổi gì** |
+
+**`unreachable` không phải là "không còn".** Một lần mạng lỗi mà hạ kênh của khách hàng xuống là dùng sự cố của mình để nói dối về dữ liệu của họ. Lần chạy sau sẽ thử lại, và hạn vẫn tính theo lần cuối **thực sự** thấy nó.
+
+### Vì sao không có trạng thái "đã đổi"
+
+Việc "giá trị đã đổi" không được đoán trong lúc đọc lại. Lần đọc lại chỉ trả lời **còn hay không còn** — câu hỏi mà nó trả lời chắc được. Nếu trang đổi sang giá trị khác thì giá trị cũ thành `gone`, và connector (chạy theo nhịp riêng) sẽ tìm ra giá trị mới như một kênh mới. Nhờ vậy mỗi lần chạy chỉ có một việc để làm sai, thay vì hai.
+
+So khớp cũng theo loại kênh: số điện thoại so **theo dãy chữ số** (`707-452-2800` và `(707) 452 2800` là cùng một số — nếu so thô thì lần nào cũng báo "không còn"), email so đúng chuỗi, LinkedIn bỏ dấu `/` cuối.
+
+### Chạy thế nào
+
+```bash
+npm run reverify:run                        # 90 ngày, 200 kênh
+npm run reverify:run -- --days 180 --limit 50
+```
+
+hoặc `POST /api/maintenance/reverify` với `{ "days": 90, "limit": 200 }`, kèm `Authorization: Bearer $CRON_SECRET` — cùng bí mật với lượt dọn dữ liệu hết hạn, nên một lịch chạy lo được cả hai.
+
+Hàng đợi (`contact_reverify_queue`) **chỉ** gồm kênh đến từ website công ty, có trang nguồn, chưa bị đánh dấu là chết, còn trong hạn. Dòng đến từ sổ đăng ký hay cơ sở dữ liệu mua không tự đọc lại được bằng cách mở một trang web — chúng tươi theo nhịp của nguồn đó.
+
+### Sổ đọc lại
+
+`contact_reverifications` là sổ **append-only**: mỗi lần đọc lại một dòng, ghi thấy gì, ở trang nào, lúc nào. Không sửa dòng cũ, nên đọc được lịch sử của một kênh. Hai ràng buộc chặn việc nói suông: `still_present` **bắt buộc** có câu chữ chứng minh, `changed` bắt buộc nói giá trị mới là gì.
+
+Dòng dữ liệu **không bị xoá** khi kênh hết hạn — lịch sử là sự thật, chỉ là nó không còn được dùng để liên hệ nữa.
+
+### Kiểm chứng
+
+`npm run reverify:test` — **37 check**, hai phần: (1) so khớp và ba câu trả lời, gồm ca `unreachable` vì HTTP 500 và vì trang đăng nhập; (2) trên Postgres thật (10 migration): hàng đợi chọn đúng kênh (bỏ kênh mua dữ liệu và kênh đã chết), `still_present` làm mới, `gone` hạ kênh khỏi danh sách xuất **nhưng dòng vẫn còn**, `unreachable` không đổi gì, và hai ràng buộc của sổ đọc lại từ chối thi hành.

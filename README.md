@@ -71,7 +71,7 @@ The app keeps working without `.env.local`; it stays in demo mode.
 ## Connect Supabase
 
 1. Create a Supabase project.
-2. Run every file in `supabase/migrations/` (nine, in order) in its SQL editor, or use the Supabase CLI:
+2. Run every file in `supabase/migrations/` (ten, in order) in its SQL editor, or use the Supabase CLI:
 
    ```bash
    supabase link --project-ref YOUR_PROJECT_REF
@@ -213,6 +213,7 @@ A line only becomes an item when it names one of those and either carries requir
 npm run requirements:test   # 24 checks: no fabrication, verbatim evidence, sources, PDF, no advice
 npm run persist:test      # 71 checks: rows built from real findings, written into a real Postgres, read back through the app's views, gated, verified, exported, WhatsApp-checked
 npm run roles:test        # 33 checks: title classification order (a procurement director is not management), other ≠ unknown
+npm run reverify:test     # 37 checks: three answers to "is this value still there", and what each one changes
 ```
 
 ### Connector: public sources to sourced channels
@@ -278,6 +279,20 @@ Phone numbers are normalised to **E.164** in `src/lib/connector/phone.ts`, in a 
 `role_kind` (migration 009) is classified once, when a person is written, by `src/lib/roles.ts` — instead of every caller re-deriving it from the title string. Buying roles (`procurement`, `purchasing`, `sourcing`, `supply_chain`) pass the role gate; `quality`, `logistics`, `sales`, `management` do not; `other` (a title nobody recognises) and `unknown` (no title found) are deliberately separate values, because "data we cannot use" and "no data" are different answers.
 
 `email_kind` carries the three labels from the standard design — `published_named`, `published_role_mailbox`, `inferred_unverified` — but it is a **new column beside** `identity_match`, not a rename of it: `identity_match` says *whose address this is*, `email_kind` says *how it was published*. A SQL function (`email_kind_for`) maps between them and a constraint refuses any row where the two disagree. Only `inferred_unverified` is blocked by the email gate; a published department mailbox is published, not guessed.
+
+### Keeping it fresh
+
+`contact_reverify_queue` (migration 010) lists the channels due for a re-read: those found on the company's own site, with a source page, not marked dead, still within their 90-day life. `POST /api/maintenance/reverify` (or `npm run reverify:run -- --days 90`) re-opens exactly that page and answers one question — is the value still there?
+
+```
+still_present  → refresh last_seen_at / expires_at, move verified_at forward
+gone           → expire the channel now (it drops out of export), keep the row
+unreachable    → change nothing
+```
+
+**`unreachable` is not "gone".** A network blip must never remove a customer's data — the next run retries, and the expiry still counts from the last time the value was actually seen. There is deliberately no third state for "the page changed to something else": the old value becomes `gone` and the connector finds the new one as a new channel, so a re-read only ever has to answer one question it can answer honestly.
+
+Every re-read is appended to `contact_reverifications` with the page, the quote and the time — `still_present` without a quote is rejected by the database, because "still there" has to be shown, not asserted.
 
 `contact_role_gate` and `contact_email_gate` are separate from `contact_export_policy` on purpose: exporting is about what may leave the building, the gates are about who is worth calling — and that decision belongs to the user.
 
