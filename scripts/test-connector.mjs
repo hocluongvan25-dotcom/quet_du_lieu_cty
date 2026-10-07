@@ -100,10 +100,11 @@ import { buildBuyerWriteBatch } from "@/lib/connector/persist";
 import { toE164, whatsappLink, isE164, resolveCountry } from "@/lib/connector/phone";
 import { readSitemap } from "@/lib/connector/sitemap";
 import { coverageOf, secondaryReason } from "@/lib/connector/gate";
-import { searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry } from "@/lib/connector/secondary";
+import { searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, lookupSecEdgar, lookupRegistry, registriesForCountry, DEFAULT_SEC_USER_AGENT } from "@/lib/connector/secondary";
 import { buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck } from "@/lib/connector/whatsapp";
+import { asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT } from "@/lib/connector/fetch";
 
-export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, collapseFormChannels, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, lookupSecEdgar, lookupRegistry, registriesForCountry };
+export const api = { runConnector, extractFromPage, extractFromLines, normalizeSeed, collectCandidateLinks, parseRobots, isPathAllowed, htmlToLines, registrableDomain, assertPublicUrl, isBlockedAddress, UnsafeUrlError, pdfToLines, looksLikePdf, unescapePdfString, decodePdfHexString, buildBuyerWriteBatch, toE164, whatsappLink, isE164, resolveCountry, readSitemap, coverageOf, secondaryReason, collapseFormChannels, searchSite, harvestUrlsFromSearch, buildSearchRequest, parseSearchHits, resolveProvider, providerFromKey, countProviderRows, hasSearchShape, lookupCompaniesHouse, DEFAULT_SEC_USER_AGENT, buildWhatsappCheckRequest, buildWhatsappAccountRequest, parseWhatsappAccount, parseWhatsappCheck, describeWhatsappCheck, asciiHeaderValue, fetchPage, DEFAULT_USER_AGENT, lookupSecEdgar, lookupRegistry, registriesForCountry };
 `;
   await mkdir(workDir, { recursive: true });
   await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
@@ -533,6 +534,82 @@ async function runChecks(api, files) {
   check("kênh khác không bị đụng tới", merged.channels.some((channel) => channel.value === "productinfo@mariani.com"));
   check("một biểu mẫu thì không gộp gì", api.collapseFormChannels([emailChannel, formOf("https://x.example/contact")]).collapsed === 0);
   check("không có biểu mẫu nào thì trả nguyên danh sách", api.collapseFormChannels([emailChannel]).channels.length === 1);
+
+
+  section("header HTTP là ByteString: chữ có dấu không đi vào header được");
+  // Đây là lỗi thật: User-Agent mặc định của SEC có chữ "đặt", nên request chết
+  // ngay ở tầng gửi (fetch ném ByteString) và người dùng chỉ thấy một câu lỗi khó
+  // hiểu. `new Headers` là đúng hàng rào đó — dùng nó làm phép thử.
+  let byteStringGate = "chấp nhận";
+  try {
+    new Headers({ "user-agent": "SeekoraBot (đặt SEC_USER_AGENT)" });
+  } catch (error) {
+    byteStringGate = String(error instanceof Error ? error.message : error);
+  }
+  check("phép thử đúng hàng rào: chữ có dấu bị Headers từ chối", byteStringGate.includes("ByteString"), byteStringGate);
+
+  check(
+    "bỏ dấu tiếng Việt, giữ nguyên nội dung",
+    api.asciiHeaderValue("Nguyễn Văn A <a@congty.vn>") === "Nguyen Van A <a@congty.vn>" &&
+      api.asciiHeaderValue("đặt SEC_USER_AGENT kèm email liên hệ") === "dat SEC_USER_AGENT kem email lien he",
+    api.asciiHeaderValue("Nguyễn Văn A <a@congty.vn>"),
+  );
+  check(
+    "ký tự lạ ngoài ASCII bị bỏ, không để lại ký tự điều khiển",
+    api.asciiHeaderValue("Bot\u0000\u0007 (công ty) ☎") === "Bot cong ty" || !/[\u0000-\u001f\u007f-\uffff]/.test(api.asciiHeaderValue("Bot\u0000\u0007 (công ty) ☎")),
+    api.asciiHeaderValue("Bot\u0000\u0007 (công ty) ☎"),
+  );
+  check(
+    "mọi header của request SEC đều qua được hàng rào ByteString — kể cả khi người dùng gõ tiếng Việt",
+    (() => {
+      const calls = [];
+      const stub = async (url, init = {}) => {
+        calls.push(init.headers ?? {});
+        return { ok: false, status: 403, url: String(url), headers: { get: () => "application/json" }, text: async () => "Forbidden", json: async () => ({}) };
+      };
+      return api
+        .lookupSecEdgar("Mariani Packing Co.", { fetchImpl: stub, secUserAgent: "Nguyễn Văn A <a@congty.vn>" })
+        .then((result) => {
+          const allBuilt = calls.every((headers) => Object.entries(headers).every(([, value]) => {
+            try {
+              new Headers({ "x-check": String(value) });
+              return true;
+            } catch {
+              return false;
+            }
+          }));
+          const agent = calls[0]?.["user-agent"];
+          return allBuilt && agent === "Nguyen Van A <a@congty.vn>" && result.reason.includes("SEC_USER_AGENT");
+        });
+    })(),
+  );
+  check(
+    "User-Agent mặc định của SEC là ASCII thuần và nhắc đặt biến",
+    [...api.DEFAULT_SEC_USER_AGENT].every((char) => char.charCodeAt(0) < 128) &&
+      api.DEFAULT_SEC_USER_AGENT.includes("SEC_USER_AGENT") &&
+      api.asciiHeaderValue(api.DEFAULT_SEC_USER_AGENT) === api.DEFAULT_SEC_USER_AGENT,
+  );
+  check("User-Agent mặc định khi đọc trang công khai cũng là ASCII thuần", [...api.DEFAULT_USER_AGENT].every((char) => char.charCodeAt(0) < 128));
+
+  const uaCalls = [];
+  await api.fetchPage("https://example.com/", {
+    userAgent: "Nguyễn Văn A <a@congty.vn>",
+    fetchImpl: async (url, init = {}) => {
+      uaCalls.push(String((init.headers ?? {})["user-agent"] ?? ""));
+      return {
+        ok: true,
+        status: 200,
+        url: String(url),
+        headers: { get: (name) => (name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null) },
+        text: async () => "<html><body>ok</body></html>",
+      };
+    },
+  });
+  check(
+    "User-Agent do người dùng truyền cho fetchPage cũng được làm sạch",
+    uaCalls[0] === "Nguyen Van A <a@congty.vn>",
+    uaCalls[0],
+  );
 
   section("SEC EDGAR: User-Agent phải kèm cách liên hệ");
   const secCalls = [];

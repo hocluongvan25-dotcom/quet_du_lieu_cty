@@ -256,6 +256,7 @@ npm run connector:run acmespices.co.uk -- --no-secondary   # company site only
 | Piece | Role |
 | --- | --- |
 | `html.ts` | HTML to lines, entity decoding, registrable-domain helper |
+| `fetch.ts` | Public-page fetcher; `asciiHeaderValue` strips diacritics before a value becomes an HTTP header — headers are ByteString (Latin-1), so a Vietnamese character in a User-Agent makes `fetch` throw before it sends anything |
 | `extract.ts` | Emails, phones (a label must sit **immediately before** the number, or the line must be a short contact line — an arbitration clause saying "by calling the AAA at 1-800-778-7879" must not become the company's phone), social/WhatsApp links, forms, adjacent person names, excluded third-party values |
 | `robots.ts` | robots.txt parsing and longest-match Allow/Disallow |
 | `fetch.ts` | One page fetch with timeout, size cap, login-wall and block detection |
@@ -269,7 +270,7 @@ npm run connector:run acmespices.co.uk -- --no-secondary   # company site only
 | `persist.ts` | Builds the database rows (pure) and writes them through a small store port: `buyer_profiles`, `decision_makers`, `contact_channels`, `buyer_routes` |
 
 ```bash
-npm run connector:test    # 223 checks on real HTML and PDF fixtures, no network needed
+npm run connector:test    # 230 checks on real HTML and PDF fixtures, no network needed
 npm run connector:run mariani.com            # real run, human readable
 npm run connector:run mariani.com -- --json  # full JSON
 ```

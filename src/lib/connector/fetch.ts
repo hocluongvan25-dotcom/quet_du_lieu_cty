@@ -7,6 +7,7 @@
  */
 
 import { assertPublicUrl, UnsafeUrlError } from "./safety";
+import { stripDiacritics } from "./phone";
 
 export type FetchKind = "html" | "pdf";
 
@@ -29,6 +30,24 @@ const DEFAULT_MAX_BYTES = 3_000_000;
 /** PDF thường nặng hơn trang HTML: báo cáo thường niên vài MB là bình thường. */
 const DEFAULT_MAX_PDF_BYTES = 12_000_000;
 export const DEFAULT_USER_AGENT = "SeekoraBot/0.1 (+public contact discovery; respects robots.txt)";
+
+/**
+ * Làm sạch một giá trị để đưa vào **header HTTP**.
+ *
+ * Header HTTP là ByteString (Latin-1), không phải UTF-8: một chữ có dấu như `đ`
+ * (U+0111 = 273) làm `fetch` ném lỗi ngay **trước khi gửi** —
+ * "Cannot convert argument to a ByteString…". Lỗi này đã xảy ra thật: chuỗi
+ * User-Agent mặc định cho SEC EDGAR có chữ "đặt", nên việc tra sổ Mỹ chết ngay
+ * ở tầng gửi request, và người dùng chỉ thấy một câu lỗi khó hiểu thay vì thấy
+ * hướng dẫn đặt `SEC_USER_AGENT`.
+ *
+ * Vì vậy mọi giá trị header do người dùng cấp đều đi qua đây: bỏ dấu, rồi bỏ
+ * nốt những ký tự còn lại không nằm trong khoảng in được của ASCII.
+ */
+export function asciiHeaderValue(value: string, maxLength = 300): string {
+  const cleaned = stripDiacritics(value).replace(/[^\x20-\x7E]/g, " ").replace(/\s+/g, " ").trim();
+  return cleaned.slice(0, maxLength);
+}
 
 const LOGIN_PATH = /\/(login|signin|sign-in|auth|account|dang-nhap)(\/|$|\?)/i;
 
@@ -72,7 +91,7 @@ export async function fetchPage(
       redirect: "follow",
       signal: controller.signal,
       headers: {
-        "user-agent": options.userAgent ?? DEFAULT_USER_AGENT,
+        "user-agent": asciiHeaderValue(options.userAgent ?? DEFAULT_USER_AGENT),
         accept: "text/html,application/xhtml+xml,application/pdf",
       },
     });

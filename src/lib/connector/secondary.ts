@@ -24,6 +24,7 @@
  */
 
 import { registrableDomain } from "./html";
+import { asciiHeaderValue } from "./fetch";
 
 // ------------------------------------------------------------- search API ---
 
@@ -330,11 +331,23 @@ export function registriesForCountry(country?: string | null): ("companies_house
  * `Nguyen Van A <a@congty.vn>`. Chưa đặt thì vẫn gửi UA nói rõ điều đó, và lỗi
  * 403 sẽ tự chỉ ra việc cần làm.
  */
+export const DEFAULT_SEC_USER_AGENT =
+  "SeekoraBot/0.1 (public supplier research; set SEC_USER_AGENT with a contact email)";
+
+/**
+ * `SEC_USER_AGENT` do người dùng đặt nên có thể có chữ có dấu — và header HTTP
+ * không nhận chữ có dấu (xem `asciiHeaderValue`). Làm sạch ở đây, ngay trước khi
+ * gửi, chứ không tin rằng người dùng sẽ chỉ gõ ASCII.
+ */
 function secHeaders(contact?: string): Record<string, string> {
-  const agent =
-    (contact ?? "").trim() ||
-    "SeekoraBot/0.1 (public supplier research; đặt SEC_USER_AGENT kèm email liên hệ)";
+  const agent = asciiHeaderValue((contact ?? "").trim() || DEFAULT_SEC_USER_AGENT);
   return { "user-agent": agent, accept: "application/json" };
+}
+
+/** True khi chuỗi người dùng đặt bị đổi vì header chỉ nhận ASCII. */
+function secUserAgentWasNormalized(contact?: string): boolean {
+  const raw = (contact ?? "").trim();
+  return Boolean(raw) && asciiHeaderValue(raw) !== raw;
 }
 
 function secForbiddenHint(status: number): string {
@@ -427,6 +440,9 @@ export async function lookupCompaniesHouse(companyName: string, keys: RegistryKe
 export async function lookupSecEdgar(companyName: string, keys: RegistryKeys = {}): Promise<RegistryResult> {
   const log = keys.log ?? (() => {});
   const fetchImpl = keys.fetchImpl ?? fetch;
+  if (secUserAgentWasNormalized(keys.secUserAgent)) {
+    log("User-Agent SEC đã được bỏ dấu: header HTTP chỉ nhận ký tự Latin-1, không nhận chữ có dấu.");
+  }
   const headers = secHeaders(keys.secUserAgent);
 
   try {

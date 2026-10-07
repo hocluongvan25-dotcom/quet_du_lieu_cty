@@ -614,7 +614,17 @@ Luật mới: nhãn phải nằm **ngay trước** số (`Phone:`, `Fax`, `Hotli
 
 **3. SEC EDGAR trả 403 vì User-Agent thiếu cách liên hệ.** Chính sách fair-access của SEC đòi header nhận diện được **kèm cách liên hệ**; User-Agent cũ chỉ có tên bot và URL nên bị chặn. Giờ `SEC_USER_AGENT` (ví dụ `Tên anh <email@congty.vn>`) đi từ `.env.local` xuyên qua API tới tận request, và thông báo lỗi 403 tự nói ra việc cần làm thay vì chỉ "SEC trả HTTP 403". Không bịa email liên hệ.
 
-Điểm chung của cả ba: **một lần chạy xanh không chứng minh dữ liệu đúng** — nó chỉ chứng minh không có lỗi nào bị ném ra. Ba lỗi này đều là "dữ liệu sai nhưng trông hợp lệ", đúng loại lỗi mà các cổng và nhãn tin cậy sinh ra để chặn.
+**4. Header HTTP không nhận chữ có dấu — và chính User-Agent mặc định của mình vướng lỗi này.** Sau khi sửa (3), lần chạy kế tiếp vẫn hỏng phần sổ Mỹ, nhưng ở tầng khác:
+
+> `sổ đăng ký không cho kết quả: lỗi khi tra: Cannot convert argument to a ByteString because the character at index 42 has a value of 273 which is greater than 255.`
+
+Index 42 là chữ **`đ`** (U+0111 = 273) — nằm trong **chuỗi mặc định của chính mình**: `"SeekoraBot/0.1 (public supplier research; đặt SEC_USER_AGENT kèm email liên hệ)"`. Header HTTP là **ByteString (Latin-1)**, không phải UTF-8; `fetch` ném lỗi ngay **trước khi gửi**. Nghĩa là request chưa từng rời máy, và câu lỗi chẳng nói gì về việc cần đặt `SEC_USER_AGENT` — tệ hơn cả lỗi 403 mà nó định hướng dẫn.
+
+Cách sửa: `asciiHeaderValue` (trong `fetch.ts`) bỏ dấu rồi bỏ nốt ký tự ngoài ASCII, và **mọi** giá trị header do người dùng cấp đi qua đó — `SEC_USER_AGENT` (đặt tiếng Việt vẫn dùng được, tự chuyển thành `Nguyen Van A <a@congty.vn>`) lẫn `userAgent` truyền cho `fetchPage`. Khi phải bỏ dấu, lần chạy nói ra.
+
+**Bài học về cách tìm lỗi:** câu lỗi "ByteString… value of 273" này **đã từng xuất hiện** trong một phép thử nội bộ trước đó (em dùng token giả có ký tự tiếng Việt), và lúc đó bị đọc là "token giả thì không tính". Đúng ra nó là một lỗi thật đang chờ: **lỗi chỉ được coi là "không tính" khi đã chứng minh được rằng dữ liệu thật không bao giờ rơi vào tình huống đó** — chứ không phải vì dữ liệu thử trông giả.
+
+Điểm chung của cả bốn: **một lần chạy xanh không chứng minh dữ liệu đúng** — nó chỉ chứng minh không có lỗi nào bị ném ra. Ba lỗi này đều là "dữ liệu sai nhưng trông hợp lệ", đúng loại lỗi mà các cổng và nhãn tin cậy sinh ra để chặn.
 
 ### Nút WhatsApp trên UI
 
@@ -622,7 +632,7 @@ Luật mới: nhãn phải nằm **ngay trước** số (`Phone:`, `Fax`, `Hotli
 
 ### Kiểm chứng
 
-- `npm run connector:test` — 223 check ở vòng 012 (120 ở vòng này), thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
+- `npm run connector:test` — 230 check ở vòng 012 (120 ở vòng này), thêm 19 check E.164: số Việt Nam (di động và cố định), Mỹ, Anh, **Ý giữ số 0**, lối viết `00`, số đã có `+`, và hai trường hợp **từ chối** (không biết quốc gia / quốc gia không nhận ra). Kiểm cả việc `value` không bị đổi khi có `phone_e164`.
 - `npm run persist:test` — 63 check: E.164 được lưu đúng, `has_whatsapp` là `null` sau khi connector ghi, view WhatsApp trống khi chưa kiểm, rồi mô phỏng kết quả kiểm → view trả `https://wa.me/17074522800`, và hai ràng buộc mới bị database từ chối thi hành.
 
 ---
@@ -800,7 +810,7 @@ Với `SEARCH_API_KEY` / `SEARCH_PROVIDER` / `COMPANIES_HOUSE_API_KEY` đặt tr
 
 ### Kiểm chứng
 
-`npm run connector:test` — **223 check** ở vòng 012 (182 ở vòng này, 120 trước đó): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá, hình dạng request/kết quả của cả ba nhà cung cấp, kết quả hỏng bị bỏ), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
+`npm run connector:test` — **230 check** ở vòng 012 (182 ở vòng này, 120 trước đó): sitemap (kể cả sitemap index, trần file, và chốt robots), cổng quyết định, search API (chỉ tên miền, `site:`, khoá trong header, không gọi mạng khi thiếu khoá, hình dạng request/kết quả của cả ba nhà cung cấp, kết quả hỏng bị bỏ), hai sổ đăng ký (chỉ người đương nhiệm, giữ nguyên tên như sổ ghi, không sinh kênh liên hệ, thiếu khoá thì không gọi mạng), và một lần chạy đầu-cuối trên website mỏng: bước 2 chỉ ra `info@` → cổng mở → search chỉ đường tới `/suppliers/register` → đọc thật trang đó → có `procurement@` kèm câu chữ trên trang, trong khi đường dẫn bị robots.txt chặn và kết quả ngoài tên miền **không** được tải.
 
 ### Kèm theo: `info@` không còn bị xếp là email bộ phận
 
