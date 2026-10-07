@@ -285,12 +285,24 @@ export function extractFromLines({ url, lines, kind = "html", html: rawHtml = ""
 
       if (/linkedin\.com$/i.test(parsed.hostname.replace(/^www\./, ""))) {
         const isProfile = /^\/in\//i.test(parsed.pathname);
-        if (!isProfile && !/^\/company\//i.test(parsed.pathname)) return;
+        if (isProfile) {
+          // Hồ sơ cá nhân không phải kênh liên hệ của công ty, và cũng chưa gắn
+          // được với người nào có tên trên trang: ghi vào "đã loại trừ", không
+          // hiện cho người dùng (spec §9), không lưu thành kênh của công ty.
+          notes.push({
+            kind: "excluded",
+            label: cleanHref.replace(/\/$/, ""),
+            detail: "Liên kết tới hồ sơ cá nhân trên LinkedIn, không phải kênh liên hệ do công ty công bố, nên không ghi thành kênh của công ty.",
+            sourceUrl: url,
+          });
+          return;
+        }
+        if (!/^\/company\//i.test(parsed.pathname)) return;
         target = {
           type: "linkedin",
           value: cleanHref.replace(/\/$/, ""),
-          label: isProfile ? "Hồ sơ LinkedIn công khai" : "LinkedIn công ty",
-          identityMatch: isProfile ? "person" : "company_general",
+          label: "Trang LinkedIn của công ty",
+          identityMatch: "company_general",
           certainty: "confirmed",
           policy: "manual_contact_only",
           sourceUrl: url,

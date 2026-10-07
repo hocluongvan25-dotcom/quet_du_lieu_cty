@@ -6,7 +6,7 @@ import type { CompanyReport } from "@/lib/demo-data";
  * Quy tắc của fixture này giống hệt pipeline thật:
  *  - Mọi giá trị đều có `sourceUrl` trỏ tới trang đã thấy nó (đối chiếu 06/10/2026).
  *  - Thứ công ty tự công bố → `certainty: "confirmed"`.
- *  - Thứ đến từ hồ sơ LinkedIn công khai nhưng chưa kiểm lại → `certainty: "probable"`,
+ *  - Thứ đến từ hồ sơ LinkedIn cá nhân nhưng chưa kiểm lại trong hệ thống → `certainty: "probable"`,
  *    kênh ở mức "liên hệ thủ công".
  *  - Không mang lời khuyên bán hàng: hệ thống chỉ tìm và ghi nguồn.
  *
@@ -137,11 +137,6 @@ export const marianiReport: CompanyReport = {
       kind: "social",
       verified: true,
     },
-    {
-      label: "Hồ sơ LinkedIn cá nhân (chưa kiểm lại trong hệ thống)",
-      url: "https://www.linkedin.com/in/stacy-nygard-1517b2b",
-      kind: "social",
-    },
   ],
   signals: ["Website xác minh", "Có bộ phận mua nguyên liệu riêng", "Có đầu mối mua hàng công khai", "Sales theo vùng công bố email"],
   people: [
@@ -152,7 +147,7 @@ export const marianiReport: CompanyReport = {
       department: "Procurement",
       identityMatch: "person",
       certainty: "probable",
-      sourceLabel: "Hồ sơ LinkedIn công khai",
+      sourceLabel: "LinkedIn cá nhân",
       sourceUrl: "https://www.linkedin.com/in/stacy-nygard-1517b2b",
       lastSeenAt: "06/10/2026",
       channels: [
@@ -171,7 +166,7 @@ export const marianiReport: CompanyReport = {
       department: "Purchasing",
       identityMatch: "person",
       certainty: "probable",
-      sourceLabel: "Hồ sơ LinkedIn công khai",
+      sourceLabel: "LinkedIn cá nhân",
       sourceUrl: "https://www.linkedin.com/in/bella-huk-5494828a",
       lastSeenAt: "06/10/2026",
       channels: [
@@ -191,7 +186,7 @@ export const marianiReport: CompanyReport = {
       previousRole: "Trước đây: Senior Buyer, Buyer/Planner tại Mariani",
       identityMatch: "person",
       certainty: "probable",
-      sourceLabel: "Hồ sơ LinkedIn công khai",
+      sourceLabel: "LinkedIn cá nhân",
       sourceUrl: "https://www.linkedin.com/in/maggie-zabat-657abb30",
       lastSeenAt: "06/10/2026",
       channels: [
@@ -210,7 +205,7 @@ export const marianiReport: CompanyReport = {
       department: "Sales & Marketing",
       identityMatch: "person",
       certainty: "probable",
-      sourceLabel: "Hồ sơ LinkedIn công khai",
+      sourceLabel: "LinkedIn cá nhân",
       sourceUrl: "https://www.linkedin.com/in/joe-flannigan-b24616b",
       lastSeenAt: "06/10/2026",
       channels: [
