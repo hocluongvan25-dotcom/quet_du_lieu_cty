@@ -113,9 +113,16 @@ The dashboard runs in demo mode until a visitor signs in; after that it reads an
 | Email confirmation | `/auth/callback` | Exchanges a PKCE code or verifies an email OTP, then returns to the app |
 | Session refresh | `src/proxy.ts` | Renews auth cookies only when a session cookie already exists |
 | First workspace | `bootstrap_workspace()` | Creates the organization, owner membership and a 50-credit starter grant in one transaction |
-| New Company Report | `POST /api/research` → `complete_research_job()` | Reserves credits, writes `research_jobs`, `company_reports` and `source_evidence`, settles the debit in `credit_ledger`, returns the stored report |
+| New Company Report | `POST /api/research` → `complete_research_job()` | Writes `research_jobs`, `company_reports` and `source_evidence`, and settles the debit in `credit_ledger` — **except for the demo provider, which is never charged** (see below) |
 
 `organization_id` is always derived from the signed-in user's membership inside the SQL functions, so a browser request can never choose its own workspace or price. Anonymous visitors keep the safe demo provider, and an unreachable project degrades to demo data with a visible notice instead of a broken page.
+
+**Stored is not the same as researched.** Today's provider is still the demo one, so a report *saved* into a real workspace is still sample content — and the app says so at every layer, because a saved row carrying "confidence 84/100" and `.example` URLs otherwise reads exactly like verified work:
+
+- every report the demo provider produces carries `sampleData: true`; the report row, the reports table and the report drawer all show a **"sample data" / "dữ liệu mẫu"** badge, and the copied summary starts with a NOTE line;
+- the provenance travels through storage: `report_data.provider = "demo"` is what the badge is read back from, so a reload or a fresh session shows the same label;
+- `src/lib/data/research-provider.ts` decides the price: `researchCreditCost("demo", 5) === 0`. Sample content never costs credits, and `POST /api/research` answers with `provider: "demo"`, `dataSource: "demo"`, `creditsCharged: 0` — `mode: "live"` means *stored in Supabase*, never *read from the web*;
+- when the real connector-backed provider lands, that file is the one line to change, and `report:test` fails if the provider and the price drift apart.
 
 ### Team, change monitoring and retention
 
@@ -209,7 +216,7 @@ Importing a file is a deliberate, reported step: `src/lib/customs/import.ts` map
 
 ```bash
 npm run export:test   # 58 checks, including re-reading the CSV with an RFC 4180 parser
-npm run report:test   # 19 checks: person channels merge onto the person card, nothing lost or invented
+npm run report:test   # 29 checks: person channels merge onto the person card, nothing lost or invented, sample reports stay labelled and unpaid
 npm run requirements:test # 24 checks: supplier requirements kept verbatim, sourced, never invented
 ```
 

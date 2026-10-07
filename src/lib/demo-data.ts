@@ -84,6 +84,12 @@ export type CompanyReport = {
   sourceInput?: string;
   status: ReportStatus;
   confidence: number;
+  /**
+   * `true` khi nội dung là **dữ liệu mẫu** (provider demo), không phải kết quả
+   * đọc nguồn công khai. UI phải hiện nhãn cho người đọc — một report mẫu có
+   * "độ tin cậy 84/100" mà không có nhãn thì người đọc hiểu sai là dữ liệu thật.
+   */
+  sampleData?: boolean;
   createdAt: string;
   expiresAt: string;
   daysLeft: number;
@@ -331,7 +337,7 @@ export function createDemoReport(input: {
   if (known) {
     const now = new Date();
     const stamped = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
-    return { ...known.report, id: `report-${Date.now()}`, createdAt: `Hôm nay, ${stamped}`, lastUpdated: `${stamped} hôm nay` };
+    return { ...known.report, id: `report-${Date.now()}`, createdAt: `Hôm nay, ${stamped}`, lastUpdated: `${stamped} hôm nay`, sampleData: true };
   }
 
   const fromUrl = input.sourceUrl
@@ -370,6 +376,8 @@ export function createDemoReport(input: {
     initials: initials || "CR",
     accent: "#4F7CFF",
     country: input.country || "Chưa xác định",
+    // Provider mẫu — UI phải nói ra, và không tính credits (xem research-provider.ts).
+    sampleData: true,
     sourceInput: input.sourceUrl,
     status: "ready",
     confidence: input.sourceUrl ? 91 : 84,

@@ -190,6 +190,11 @@ export function toCompanyReportView(options: {
 
   const signals = readSignals(report.report_data);
 
+  // Nguồn gốc nội dung, đọc từ chính dòng dữ liệu: provider mẫu ⇒ report mẫu.
+  // Report do provider thật tạo sau này sẽ không mang nhãn này.
+  const providerValue = (report.report_data as { provider?: unknown } | null | undefined)?.provider;
+  const sampleData = typeof providerValue === "string" && providerValue.toLowerCase().startsWith("demo");
+
   return {
     id: report.id,
     companyName: report.company_name,
@@ -198,6 +203,7 @@ export function toCompanyReportView(options: {
     country: report.country || (locale === "vi" ? "Chưa xác định" : "Unknown"),
     status: researchStatus(report),
     confidence: report.confidence,
+    ...(sampleData ? { sampleData: true } : {}),
     createdAt: formatMoment(report.captured_at, locale),
     expiresAt: formatDate(report.expires_at, locale),
     daysLeft: daysLeft(report.expires_at),

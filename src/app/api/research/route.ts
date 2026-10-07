@@ -4,6 +4,7 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { fetchWorkspaceAccount } from "@/lib/data/workspace";
 import { toCompanyReportView, type CompanyReportRow, type SourceEvidenceRow } from "@/lib/data/report-view";
 import { REPORT_COST } from "@/lib/data/workspace-types";
+import { RESEARCH_PROVIDER, researchCreditCost } from "@/lib/data/research-provider";
 import { normalizeLocale } from "@/lib/i18n";
 
 export const runtime = "nodejs";
@@ -126,9 +127,13 @@ export async function POST(request: Request) {
     );
   }
 
-  // This is a safe demo provider. In production, replace it with a queued
-  // orchestration job: URL validation -> permitted source connectors ->
-  // extraction -> entity resolution -> source evidence.
+  // Provider hiện tại là **provider mẫu**: nội dung là báo cáo minh hoạ, không
+  // phải kết quả đọc nguồn công khai. Vì vậy report mang `sampleData: true`,
+  // KHÔNG trừ credits (`researchCreditCost`), và phản hồi nói rõ
+  // `dataSource: "demo"` — "đã lưu vào Supabase" không có nghĩa "dữ liệu thật".
+  // Khi nối provider thật: thay lời gọi này bằng job xếp hàng đợi
+  // (validate URL → connector nguồn được phép → trích xuất → đối chiếu pháp nhân
+  // → bằng chứng), rồi đổi RESEARCH_PROVIDER trong src/lib/data/research-provider.ts.
   const report = createDemoReport({ companyName, sourceUrl, country });
 
   const supabase = await getSupabaseServerClient();
@@ -136,7 +141,7 @@ export async function POST(request: Request) {
   // Anonymous visitors keep the demo response so the product can be explored
   // before an account exists.
   if (!supabase) {
-    return NextResponse.json({ report, mode: "demo", creditsCharged: 0, dataSource: "demo" });
+    return NextResponse.json({ report, mode: "demo", provider: RESEARCH_PROVIDER, dataSource: "demo", creditsCharged: 0, stored: false });
   }
 
   let user = null;
@@ -157,7 +162,7 @@ export async function POST(request: Request) {
   }
 
   if (!user) {
-    return NextResponse.json({ report, mode: "demo", creditsCharged: 0, dataSource: "demo" });
+    return NextResponse.json({ report, mode: "demo", provider: RESEARCH_PROVIDER, dataSource: "demo", creditsCharged: 0, stored: false });
   }
 
   try {
@@ -178,7 +183,7 @@ export async function POST(request: Request) {
       p_input_country: country || null,
       p_report: reportRow,
       p_evidence: evidence,
-      p_cost: REPORT_COST,
+      p_cost: researchCreditCost(RESEARCH_PROVIDER, REPORT_COST),
       p_retention_days: account.retentionDays,
     });
 
@@ -214,12 +219,19 @@ export async function POST(request: Request) {
         })
       : report;
 
+    const charged = researchCreditCost(RESEARCH_PROVIDER, REPORT_COST);
+
     return NextResponse.json({
       report: storedReport,
+      // `mode` nói dữ liệu **được lưu** ở đâu; `dataSource` nói nội dung **lấy
+      // từ** đâu. Trước đây trường thứ hai trả "supabase", khiến phản hồi đọc
+      // như "kết quả thật" trong khi nội dung vẫn là báo cáo mẫu.
       mode: "live",
-      creditsCharged: REPORT_COST,
-      creditsRemaining: Math.max(0, account.credits - REPORT_COST),
-      dataSource: "supabase",
+      provider: RESEARCH_PROVIDER,
+      dataSource: RESEARCH_PROVIDER === "demo" ? "demo" : "connector",
+      stored: true,
+      creditsCharged: charged,
+      creditsRemaining: Math.max(0, account.credits - charged),
     });
   } catch {
     return NextResponse.json(

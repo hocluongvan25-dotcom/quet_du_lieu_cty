@@ -34,7 +34,7 @@ function section(title) {
   console.log(`\n${title}`);
 }
 
-const entry = `export * from "@/lib/report-sections";\nexport { marianiReport } from "@/lib/demo-mariani";\nexport { createDemoReport } from "@/lib/demo-data";\n`;
+const entry = `export * from "@/lib/report-sections";\nexport { marianiReport } from "@/lib/demo-mariani";\nexport { createDemoReport } from "@/lib/demo-data";\nexport { toCompanyReportView } from "@/lib/data/report-view";\nexport { RESEARCH_PROVIDER, researchCreditCost } from "@/lib/data/research-provider";\n`;
 
 await rm(workDir, { recursive: true, force: true });
 await mkdir(workDir, { recursive: true });
@@ -43,7 +43,7 @@ await writeFile(path.join(workDir, "entry.ts"), entry, "utf8");
 
 await bundleTs(path.join(workDir, "entry.ts"), bundlePath);
 
-const { buildReportSections, marianiReport } = await import(pathToFileURL(bundlePath).href);
+const { buildReportSections, marianiReport, createDemoReport, toCompanyReportView, RESEARCH_PROVIDER, researchCreditCost } = await import(pathToFileURL(bundlePath).href);
 
 const sections = buildReportSections(marianiReport);
 
@@ -99,6 +99,66 @@ check("nhãn không có tên thì không bịa ra người", buildReportSections
 check("email không gắn được tên thì xuống khối dưới, không mất", buildReportSections({ ...withoutName, contacts: [{ label: "Email chung", value: "info@x.com", type: "email", verified: true, source: "site", identityMatch: "person" }] }).departmentChannels.length === 1);
 
 await rm(workDir, { recursive: true, force: true });
+
+
+section("report mẫu phải tự nói mình là mẫu — và không được tính tiền");
+
+// Đúng những gì người dùng thấy khi tra "Vinamilk" / "FPT Corporation" trên
+// giao diện: trạng thái "Chưa xác định", độ tin cậy 84/100, URL dạng .example.
+// Ba con số đó phải đi kèm nhãn "dữ liệu mẫu", nếu không người đọc hiểu sai.
+const vinamilk = createDemoReport({ companyName: "Vinamilk" });
+check("báo cáo mẫu tự mang cờ sampleData", vinamilk.sampleData === true);
+check(
+  "và đúng là dữ liệu mẫu về nội dung: chưa xác định quốc gia, không có nguồn thật",
+  vinamilk.country === "Chưa xác định" && vinamilk.website.endsWith(".example"),
+  `${vinamilk.country} · ${vinamilk.website} · ${vinamilk.confidence}/100`,
+);
+const fpt = createDemoReport({ sourceUrl: "https://fpt.example.vn" });
+check("tra bằng link cũng là báo cáo mẫu", fpt.sampleData === true);
+
+// Dòng lưu trong Supabase: nguồn gốc đọc từ chính dữ liệu, không phải từ chỗ lưu.
+const baseRow = {
+  id: "r1",
+  company_name: "Vinamilk",
+  country: null,
+  city: null,
+  industry: null,
+  description: null,
+  official_website: null,
+  linkedin_url: null,
+  public_business_email: null,
+  public_business_phone: null,
+  whatsapp_business_url: null,
+  confidence: 84,
+  captured_at: "2026-10-07T00:00:00.000Z",
+  expires_at: "2026-11-06T00:00:00.000Z",
+  research_jobs: { status: "ready" },
+};
+const demoRowView = toCompanyReportView({
+  report: { ...baseRow, report_data: { provider: "demo", signals: [] } },
+  evidence: [],
+  locale: "vi",
+});
+check("dòng lưu từ provider mẫu hiện nhãn mẫu khi đọc lại", demoRowView.sampleData === true);
+check("độ tin cậy vẫn giữ nguyên con số, nhãn chỉ nói thêm nguồn gốc", demoRowView.confidence === 84);
+
+const unmarkedRowView = toCompanyReportView({
+  report: { ...baseRow, report_data: { signals: [] } },
+  evidence: [],
+  locale: "vi",
+});
+check("dòng cũ không có thông tin provider thì KHÔNG tự dán nhãn mẫu", unmarkedRowView.sampleData === undefined);
+
+const connectorRowView = toCompanyReportView({
+  report: { ...baseRow, report_data: { provider: "connector", signals: [] } },
+  evidence: [],
+  locale: "vi",
+});
+check("dòng của provider thật không mang nhãn mẫu", connectorRowView.sampleData === undefined);
+
+check("provider mẫu KHÔNG trừ credits", researchCreditCost("demo", 5) === 0 && researchCreditCost(RESEARCH_PROVIDER, 5) === 0);
+check("provider thật thì tính đúng giá", researchCreditCost("connector", 5) === 5 && researchCreditCost(RESEARCH_PROVIDER === "demo" ? "connector" : "demo", 5) === 5);
+check("hằng số provider hiện tại là provider mẫu — đổi provider thì phải đổi cả chỗ này", RESEARCH_PROVIDER === "demo", RESEARCH_PROVIDER);
 
 console.log(`\n${passed} check pass, ${failed} fail`);
 process.exit(failed === 0 ? 0 : 1);

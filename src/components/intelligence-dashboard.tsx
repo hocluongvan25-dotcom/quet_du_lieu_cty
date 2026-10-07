@@ -90,6 +90,11 @@ function reportSummaryForClipboard(report: CompanyReport, locale: AppLocale) {
     `${isVietnamese ? "Quốc gia" : "Country"}: ${report.country}`,
     `${isVietnamese ? "Ngành" : "Industry"}: ${report.industry}`,
     `${isVietnamese ? "Độ tin cậy" : "Confidence"}: ${report.confidence}/100`,
+    report.sampleData
+      ? isVietnamese
+        ? "LƯU Ý: đây là báo cáo mẫu — chưa đọc từ nguồn công khai"
+        : "NOTE: this is a sample report — not read from public sources"
+      : "",
     report.website ? `${isVietnamese ? "Website" : "Website"}: ${report.website}` : "",
     "",
     `${isVietnamese ? "KÊNH KINH DOANH ĐÃ XÁC MINH" : "VERIFIED BUSINESS CHANNELS"}:`,
@@ -242,6 +247,8 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
         error?: string;
         creditsCharged?: number;
         creditsRemaining?: number;
+        dataSource?: string;
+        provider?: string;
       };
 
       if (!response.ok || !result.report) throw new Error(result.error || "Không thể tạo report lúc này.");
@@ -253,7 +260,7 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
       setSelectedReport(result.report);
       setCompanyName("");
       setSourceUrl("");
-      notify(t.dashboard.completed);
+      notify(result.dataSource === "demo" ? t.dashboard.sampleNotice : t.dashboard.completed);
       if (isLive) {
         // Re-read the workspace so credits, report ids and evidence are the
         // stored rows instead of the optimistic client state.
@@ -474,7 +481,7 @@ export function IntelligenceDashboard({ workspace }: { workspace: WorkspaceSnaps
                             <Avatar report={report} size="sm" />
                             <span>
                               <span className="block max-w-[220px] truncate text-[12px] font-bold text-[#353947] group-hover:text-[#5E53E8]">{report.companyName}</span>
-                              <span className="mt-0.5 flex items-center gap-1 text-[10px] text-[#9095A3]"><Globe2 size={11} /> {report.country} · {report.createdAt}</span>
+                              <span className="mt-0.5 flex items-center gap-1 text-[10px] text-[#9095A3]"><Globe2 size={11} /> {report.country} · {report.createdAt}{report.sampleData ? <span className="rounded-full bg-[#F1F2F5] px-1.5 py-0.5 text-[9px] font-bold text-[#6C7280]">{t.dashboard.sampleBadge}</span> : null}</span>
                             </span>
                           </button>
                         </td>
@@ -655,7 +662,7 @@ function ReportDrawer({ locale, report, onClose, onCopy, onRefresh, onArchive }:
 
           <div className="mt-5 rounded-2xl border border-[#E8EAF0] bg-white p-4">
             <div className="flex items-start justify-between gap-4">
-              <div><p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#9BA0AF]">{t.drawer.confidence}</p><p className="mt-1 text-[25px] font-bold tracking-[-0.05em] text-[#343746]">{report.confidence}<span className="text-sm text-[#858B99]">/100</span></p></div>
+              <div><p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#9BA0AF]">{t.drawer.confidence}</p><p className="mt-1 text-[25px] font-bold tracking-[-0.05em] text-[#343746]">{report.confidence}<span className="text-sm text-[#858B99]">/100</span></p>{report.sampleData ? <span className="mt-1.5 inline-flex rounded-full bg-[#F1F2F5] px-2 py-0.5 text-[10px] font-bold text-[#6C7280]">{t.dashboard.sampleBadge}</span> : null}</div>
             </div>
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#EDF0F3]"><div className={`h-full rounded-full ${report.confidence >= 80 ? "bg-[#32AD83]" : "bg-[#E9A143]"}`} style={{ width: `${report.confidence}%` }} /></div>
             <p className="mt-3 text-[11px] leading-5 text-[#757B8A]">{report.description}</p>
